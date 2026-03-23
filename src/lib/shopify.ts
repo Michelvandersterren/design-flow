@@ -153,12 +153,7 @@ export async function createShopifyProduct(designId: string) {
     })
   }
 
-  // Update design status
-  await prisma.design.update({
-    where: { id: designId },
-    data: { status: 'PUBLISHING' },
-  })
-
+  // Mark workflow step as completed
   await prisma.workflowStep.upsert({
     where: { designId_step: { designId, step: 'SHOPIFY_PUBLISH' } },
     create: {

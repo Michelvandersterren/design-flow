@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createShopifyProduct, buildShopifyProduct, isShopifyConfigured } from '@/lib/shopify'
+import { markDesignLiveInNotion } from '@/lib/notion'
+import { prisma } from '@/lib/prisma'
 
 /**
  * POST /api/designs/[id]/publish
@@ -8,7 +10,8 @@ import { createShopifyProduct, buildShopifyProduct, isShopifyConfigured } from '
  * Body: {} (uses all design data from DB)
  *
  * Returns the Shopify product ID and handle.
- * The product is created as a DRAFT — use /api/designs/[id]/publish/activate to make it live.
+ * The product is created as a DRAFT on Shopify.
+ * After creation, the design status is set to LIVE and Notion is updated.
  */
 export async function POST(
   request: NextRequest,
@@ -25,7 +28,28 @@ export async function POST(
 
   try {
     const result = await createShopifyProduct(designId)
-    return NextResponse.json({ success: true, ...result })
+
+    // Set design status to LIVE in DB
+    const design = await prisma.design.update({
+      where: { id: designId },
+      data: { status: 'LIVE' },
+    })
+
+    // Write back to Notion if notionId is available
+    if (design.notionId) {
+      try {
+        await markDesignLiveInNotion(design.notionId)
+      } catch (notionError) {
+        // Log but don't fail the response — Shopify publish succeeded
+        console.error('Notion write-back failed (non-fatal):', notionError)
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      notionUpdated: !!design.notionId,
+      ...result,
+    })
   } catch (error) {
     console.error('Shopify publish error:', error)
     const message = error instanceof Error ? error.message : 'Failed to publish to Shopify'
