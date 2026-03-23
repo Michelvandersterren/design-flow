@@ -1,8 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { ANTHROPIC_API_KEY } from './env'
 
 const anthropic = new Anthropic({
-  apiKey: ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
 export interface GeneratedContent {
@@ -24,9 +23,9 @@ export async function generateContent(
     CIRCLE: 'muurcirkel',
     SPLASH: 'spatscherm',
   }
-  
+
   const productName = productNames[productType]
-  
+
   const prompt = `Je schrijft productcontent voor een ${productName} webshop.
 
 Design informatie:
@@ -46,18 +45,18 @@ Formatteer als JSON met keys: description, altText, seoTitle, seoDescription`
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 1024,
       messages: [
         {
           role: 'user',
-          content: prompt
-        }
-      ]
+          content: prompt,
+        },
+      ],
     })
-    
+
     const text = response.content[0].type === 'text' ? response.content[0].text : ''
-    
+
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
@@ -68,7 +67,7 @@ Formatteer als JSON met keys: description, altText, seoTitle, seoDescription`
         seoDescription: parsed.seoDescription || '',
       }
     }
-    
+
     return {
       description: text,
       altText: `${designName} - ${productName}`,
