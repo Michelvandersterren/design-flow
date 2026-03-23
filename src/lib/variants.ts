@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import { IB_SIZES, MC_SIZES, PRODUCT_SKU_PREFIX } from './constants'
+import { generateNextEan } from './ean'
 
 /**
  * Generate the SKU for an IB variant.
@@ -43,6 +44,7 @@ export async function generateIbVariants(designId: string, designCode: string) {
         productType: 'IB',
         size: `${size.width}x${size.height}`,
         sku,
+        ean: await generateNextEan(),
         price: size.price,
         weight: size.weightGrams / 1000, // store in kg
       },
@@ -76,6 +78,7 @@ export async function generateMcVariants(designId: string, designCode: string) {
         productType: 'MC',
         size: `${size.diameter}`,
         sku,
+        ean: await generateNextEan(),
         price: size.price,
         weight: size.weightGrams / 1000,
       },
