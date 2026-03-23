@@ -40,54 +40,61 @@ async function syncAllDesigns() {
   let synced = 0
   let created = 0
   let updated = 0
+  let errors = 0
   
-  const baseData = {
-    designName: design.designName,
-    designType: design.designType,
-    styleFamily: design.styleFamily,
-    collections: JSON.stringify(design.collections),
-    colorTags: JSON.stringify(design.colorTags),
-    inductionFriendly: design.inductionFriendly,
-    circleFriendly: design.circleFriendly,
-    splashFriendly: design.splashFriendly,
-    notionData: JSON.stringify(design),
-    status: design.liveStatus === 'LIVE' ? 'LIVE' : 'DRAFT',
-  }
-
-  try {
-    const existingByNotion = await prisma.design.findFirst({
-      where: { 
-        OR: [
-          { notionId: design.id },
-          { designCode: design.designCode }
-        ]
-      }
-    })
-
-    if (existingByNotion) {
-      await prisma.design.update({
-        where: { id: existingByNotion.id },
-        data: {
-          ...baseData,
-          notionId: design.id,
-        }
-      })
-      updated++
-    } else {
-      await prisma.design.create({
-        data: {
-          notionId: design.id,
-          designCode: design.designCode,
-          ...baseData,
-        }
-      })
-      created++
+  for (const page of allPages) {
+    const design = parseNotionDesign(page)
+    
+    if (!design.designCode) continue
+    
+    const baseData = {
+      designName: design.designName,
+      designType: design.designType,
+      styleFamily: design.styleFamily,
+      collections: JSON.stringify(design.collections),
+      colorTags: JSON.stringify(design.colorTags),
+      inductionFriendly: design.inductionFriendly,
+      circleFriendly: design.circleFriendly,
+      splashFriendly: design.splashFriendly,
+      notionData: JSON.stringify(design),
+      status: design.liveStatus === 'LIVE' ? 'LIVE' : 'DRAFT',
     }
-    synced++
-  } catch (error: any) {
-    console.error(`Error syncing design ${design.designCode}:`, error.message)
+
+    try {
+      const existingByNotion = await prisma.design.findFirst({
+        where: { 
+          OR: [
+            { notionId: design.id },
+            { designCode: design.designCode }
+          ]
+        }
+      })
+
+      if (existingByNotion) {
+        await prisma.design.update({
+          where: { id: existingByNotion.id },
+          data: {
+            ...baseData,
+            notionId: design.id,
+          }
+        })
+        updated++
+      } else {
+        await prisma.design.create({
+          data: {
+            notionId: design.id,
+            designCode: design.designCode,
+            ...baseData,
+          }
+        })
+        created++
+      }
+      synced++
+    } catch (error: any) {
+      console.error(`Error syncing design ${design.designCode}:`, error.message)
+      errors++
+    }
   }
-}
   
   await prisma.syncLog.create({
     data: {
@@ -105,6 +112,7 @@ async function syncAllDesigns() {
     synced,
     created,
     updated,
+    errors,
   })
 }
 
@@ -123,8 +131,13 @@ async function syncSingleDesign(designCode: string) {
   
   const design = parseNotionDesign(response.results[0])
   
-  const existing = await prisma.design.findUnique({
-    where: { notionId: design.id }
+  const existing = await prisma.design.findFirst({
+    where: { 
+      OR: [
+        { notionId: design.id },
+        { designCode: design.designCode }
+      ]
+    }
   })
   
   if (existing) {
