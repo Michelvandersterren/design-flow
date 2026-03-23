@@ -1,0 +1,8 @@
+export const NOTION_TOKEN = process.env.NOTION_TOKEN || ''
+export const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID || ''
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || ''
+export const DEEPL_API_KEY = process.env.DEEPL_API_KEY || ''
+export const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
+export const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
+export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
+export const GS1_API_KEY = process.env.GS1_API_KEY || ''

@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Design {
+  id                String    @id @default(cuid())
+  notionId          String?   @unique
+  designCode        String    @unique
+  designName        String
+  designType        String?
+  styleFamily       String?
+  collections       String?
+  colorTags         String?
+  inductionFriendly Boolean   @default(false)
+  circleFriendly    Boolean   @default(false)
+  splashFriendly    Boolean   @default(false)
+  
+  notionData        String?
+  
+  status            String    @default("DRAFT")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  variants          Variant[]
+  content           Content[]
+  workflowSteps     WorkflowStep[]
+  
+  @@index([designCode])
+  @@index([status])
+}
+
+model Variant {
+  id              String   @id @default(cuid())
+  designId        String
+  design          Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  
+  productType     String
+  size            String
+  sku             String   @unique
+  ean             String?
+  
+  shopifyProductId String?
+  shopifyVariantId String?
+  
+  price           Float?
+  weight          Float?
+  
+  printFilePath   String?
+  mockupFilePath  String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([designId])
+  @@index([sku])
+  @@index([ean])
+}
+
+model Content {
+  id          String   @id @default(cuid())
+  designId    String
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  
+  language    String
+  description String?
+  altText     String?
+  seoTitle    String?
+  seoDescription String?
+  
+  translatedFrom String?
+  translationStatus String @default("PENDING")
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([designId, language])
+  @@index([designId])
+}
+
+model WorkflowStep {
+  id          String   @id @default(cuid())
+  designId    String
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  
+  step        String
+  status      String   @default("PENDING")
+  
+  data        String?
+  error       String?
+  
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  @@unique([designId, step])
+  @@index([designId])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  key       String   @unique
+  service   String
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+}
+
+model SyncLog {
+  id        String   @id @default(cuid())
+  source    String
+  action    String
+  entity    String
+  entityId  String
+  status    String
+  details   String?
+  createdAt DateTime @default(now())
+}
