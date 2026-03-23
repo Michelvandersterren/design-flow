@@ -113,7 +113,37 @@ npx prisma generate  # Generate Prisma client
 
 ## Current Status
 
-- App running at http://localhost:3000
-- Sync fixed to handle duplicate design codes
-- First sync: 100 designs imported
-- Full sync (292 designs) pending after fix validation
+- ✅ Full Notion sync: 291 designs, 0 errors
+- ✅ AI content generation (Claude Sonnet) working — tested on Taupe Mist (TAUPM)
+- ✅ Translation via Claude (NL → DE) working — DeepL optional when key is added
+- ✅ Variant generation (IB: 19 sizes, MC: 4 sizes) working — idempotent
+- ✅ Shopify product payload builder working — awaiting SHOPIFY_ACCESS_TOKEN
+
+### Translation
+- Primary: Claude Sonnet (works without DeepL key)
+- Fallback to DeepL when `DEEPL_API_KEY` is set in `.env`
+- Supported: NL → DE (EN, FR planned)
+
+### Variant Sizes (IB)
+- 19 standard sizes from 52×35cm to 91.6×52.7cm
+- SKU format: `IB-{CODE}-{WIDTH_MM}-{HEIGHT_MM}` (e.g., `IB-TAUPM-520-350`)
+- Prices: €33.50–€37.50 based on size
+
+### Variant Sizes (MC)
+- 4 standard diameters: 400, 600, 800, 1000mm
+- SKU format: `MC-{CODE}-{DIAMETER_MM}` (e.g., `MC-TAUPM-600`)
+- Prices: €19.95–€44.95
+
+### API Routes
+- `POST /api/designs/[id]/variants` — generate variants from design flags
+- `GET  /api/designs/[id]/variants` — list variants grouped by type
+- `POST /api/designs/[id]/translate` — translate NL content to DE/EN/FR
+- `POST /api/designs/[id]/publish` — create draft product on Shopify (needs token)
+- `GET  /api/designs/[id]/publish` — preview Shopify payload (no token needed)
+
+### Next Steps
+1. Add `SHOPIFY_ACCESS_TOKEN` to `.env` → publishing becomes live
+2. Add `DEEPL_API_KEY` to `.env` → translations switch to DeepL
+3. EAN generation (GS1 API or manual assignment)
+4. Write-back to Notion (set Live = true after publish)
+5. UI: dashboard + bulk actions for new design batches
