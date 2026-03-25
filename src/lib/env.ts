@@ -3,6 +3,12 @@ export const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID || ''
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || ''
 export const DEEPL_API_KEY = process.env.DEEPL_API_KEY || ''
 export const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
+export const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || ''
+export const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ''
 export const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
 export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
 export const GS1_API_KEY = process.env.GS1_API_KEY || ''
+
+export const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || ''
+export const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
+export const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || ''

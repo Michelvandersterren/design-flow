@@ -21,6 +21,8 @@ model Design {
   splashFriendly    Boolean   @default(false)
   
   notionData        String?
+  driveFileId       String?
+  driveFileName     String?
   
   status            String    @default("DRAFT")
   createdAt         DateTime  @default(now())
@@ -29,6 +31,7 @@ model Design {
   variants          Variant[]
   content           Content[]
   workflowSteps     WorkflowStep[]
+  mockups           DesignMockup[]
   
   @@index([designCode])
   @@index([status])
@@ -41,6 +44,7 @@ model Variant {
   
   productType     String
   size            String
+  material        String?  // SP only: 'G' | 'BH0' | 'BH4'
   sku             String   @unique
   ean             String?
   
@@ -100,6 +104,24 @@ model WorkflowStep {
   @@index([designId])
 }
 
+// Stores every generated mockup Drive URL per design
+model DesignMockup {
+  id          String   @id @default(cuid())
+  designId    String
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+
+  templateId  String   // e.g. "IB-mockup3"
+  outputName  String   // e.g. "mockup-3"
+  productType String   // IB | SP | MC
+  driveFileId String
+  driveUrl    String
+  altText     String?  // SEO alt-tekst specifiek voor deze mockup afbeelding
+
+  createdAt   DateTime @default(now())
+
+  @@index([designId])
+}
+
 model ApiKey {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -118,4 +140,40 @@ model SyncLog {
   status    String
   details   String?
   createdAt DateTime @default(now())
+}
+
+model BrandVoice {
+  id          String   @id @default(cuid())
+  key         String   @unique  // e.g. "main"
+  
+  // Bedrijfsinformatie
+  companyInfo       String?
+  mission           String?
+  targetAudience    String?
+  
+  // Productiepartner & materialen
+  partnerInfo       String?
+  materialIB        String?
+  materialMC        String?
+  materialSP        String?
+  
+  // Tone of voice
+  toneOfVoice       String?
+  doUse             String?   // comma-separated words/phrases to use
+  doNotUse          String?   // comma-separated words/phrases to avoid
+  
+  // SEO keywords per product type
+  seoKeywordsIB     String?
+  seoKeywordsMC     String?
+  seoKeywordsSP     String?
+  
+  // Voorbeeldteksten
+  exampleDescriptionIB  String?
+  exampleDescriptionMC  String?
+  exampleDescriptionSP  String?
+  
+  // FAQ
+  faq               String?   // JSON array of {q, a}
+  
+  updatedAt DateTime @updatedAt
 }

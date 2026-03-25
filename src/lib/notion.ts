@@ -57,3 +57,43 @@ export function parseNotionDesign(page: any): NotionDesignProperties {
     masterFileLink: getUrl(props['Master File Link']),
   }
 }
+
+/**
+ * Zet het "Live on KitchenArt NL?" status-veld op LIVE voor een Notion pagina.
+ * Schrijft optioneel ook de Shopify product URL terug naar Notion.
+ * Gebruik na succesvolle Shopify publicatie.
+ */
+export async function markDesignLiveInNotion(
+  notionPageId: string,
+  shopifyHandle?: string
+): Promise<void> {
+  const properties: Record<string, unknown> = {
+    'Live on KitchenArt NL?': {
+      status: { name: 'LIVE' },
+    },
+  }
+
+  if (shopifyHandle) {
+    const shopifyUrl = `https://www.kitchenart.nl/products/${shopifyHandle}`
+    properties['Shopify URL'] = { url: shopifyUrl }
+  }
+
+  await notion.pages.update({
+    page_id: notionPageId,
+    properties,
+  } as any)
+}
+
+/**
+ * Zet het "Live on KitchenArt NL?" status-veld op "Not Online".
+ */
+export async function markDesignOfflineInNotion(notionPageId: string): Promise<void> {
+  await notion.pages.update({
+    page_id: notionPageId,
+    properties: {
+      'Live on KitchenArt NL?': {
+        status: { name: 'Not Online' },
+      },
+    },
+  } as any)
+}

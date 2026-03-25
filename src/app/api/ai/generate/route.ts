@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
       design.designCode,
       collections,
       colorTags,
-      productType || 'INDUCTION'
+      productType || 'INDUCTION',
+      design.driveFileId ?? null
     )
     
     const existingContent = await prisma.content.findUnique({

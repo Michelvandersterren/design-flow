@@ -38,7 +38,7 @@ export async function POST(
     // Write back to Notion if notionId is available
     if (design.notionId) {
       try {
-        await markDesignLiveInNotion(design.notionId)
+        await markDesignLiveInNotion(design.notionId, result.shopifyProductHandle)
       } catch (notionError) {
         // Log but don't fail the response — Shopify publish succeeded
         console.error('Notion write-back failed (non-fatal):', notionError)

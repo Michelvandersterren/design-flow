@@ -1,5 +1,5 @@
 import { prisma } from './prisma'
-import { IB_SIZES, MC_SIZES, PRODUCT_SKU_PREFIX } from './constants'
+import { IB_SIZES, MC_SIZES, SP_SIZES, SP_MATERIALS, PRODUCT_SKU_PREFIX } from './constants'
 import { generateNextEan } from './ean'
 
 /**
@@ -18,6 +18,55 @@ export function buildIbSku(designCode: string, width: number, height: number): s
  */
 export function buildMcSku(designCode: string, diameter: number): string {
   return `${PRODUCT_SKU_PREFIX.CIRCLE}-${designCode}-${diameter}`
+}
+
+/**
+ * Generate the SKU for an SP variant.
+ * Format: SP-{DESIGNCODE}-{WIDTH}-{HEIGHT}-{MATERIAL}
+ * Example: SP-ARCGL-600-300-G
+ */
+export function buildSpSku(designCode: string, width: number, height: number, material: string): string {
+  return `${PRODUCT_SKU_PREFIX.SPLASH}-${designCode}-${width}-${height}-${material}`
+}
+
+/**
+ * Generate all SP variants for a design and persist them to the DB.
+ * 12 sizes × 3 materials = 36 variants per design.
+ * Skips SKUs that already exist (idempotent).
+ */
+export async function generateSpVariants(designId: string, designCode: string) {
+  const created = []
+  const skipped = []
+
+  for (const size of SP_SIZES) {
+    for (const mat of SP_MATERIALS) {
+      const sku = buildSpSku(designCode, size.width, size.height, mat.code)
+
+      const existing = await prisma.variant.findUnique({ where: { sku } })
+      if (existing) {
+        skipped.push(sku)
+        continue
+      }
+
+      const price = size.priceG + mat.priceOffset
+
+      const variant = await prisma.variant.create({
+        data: {
+          designId,
+          productType: 'SP',
+          size: `${size.width}x${size.height}`,
+          material: mat.code,
+          sku,
+          ean: await generateNextEan(),
+          price,
+          weight: size.weightGrams / 1000, // store in kg
+        },
+      })
+      created.push(variant)
+    }
+  }
+
+  return { created, skipped }
 }
 
 /**
@@ -93,6 +142,7 @@ export async function generateMcVariants(designId: string, designCode: string) {
  * Generate variants for a design based on its product type flags.
  * inductionFriendly → IB variants
  * circleFriendly    → MC variants
+ * splashFriendly    → SP variants
  */
 export async function generateVariantsForDesign(designId: string) {
   const design = await prisma.design.findUnique({
@@ -110,6 +160,10 @@ export async function generateVariantsForDesign(designId: string) {
 
   if (design.circleFriendly) {
     results.MC = await generateMcVariants(designId, design.designCode)
+  }
+
+  if (design.splashFriendly) {
+    results.SP = await generateSpVariants(designId, design.designCode)
   }
 
   return results

@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { SP_SIZES, SP_MATERIALS } from './constants'
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
@@ -41,6 +42,7 @@ export async function buildShopifyProduct(designId: string) {
     include: {
       content: true,
       variants: { orderBy: [{ productType: 'asc' }, { size: 'asc' }] },
+      mockups: { orderBy: { createdAt: 'asc' } },
     },
   })
 
@@ -50,12 +52,12 @@ export async function buildShopifyProduct(designId: string) {
   if (!nlContent) throw new Error('Dutch content required before publishing to Shopify')
 
   // Determine product type label
+  const firstType = design.variants[0]?.productType
   const productTypeLabel =
-    design.variants[0]?.productType === 'IB'
-      ? 'Inductie Beschermer'
-      : design.variants[0]?.productType === 'MC'
-      ? 'Muurcirkel'
-      : 'Product'
+    firstType === 'IB' ? 'Inductie Beschermer'
+    : firstType === 'MC' ? 'Muurcirkel'
+    : firstType === 'SP' ? 'Spatscherm'
+    : 'Product'
 
   // Build tags — fields are stored as JSON arrays or comma-separated strings
   const tags: string[] = []
@@ -71,18 +73,35 @@ export async function buildShopifyProduct(designId: string) {
   tags.push(...parseField(design.collections))
   tags.push(...parseField(design.colorTags))
 
+  // Lookup helpers for SP labels
+  const spSizeLabel = (size: string): string => {
+    const [w, h] = size.split('x').map(Number)
+    return SP_SIZES.find((s) => s.width === w && s.height === h)?.label ?? size
+  }
+  const spMaterialLabel = (code: string): string => {
+    return SP_MATERIALS.find((m) => m.code === code)?.label ?? code
+  }
+
   // Build Shopify variants
+  const isSpProduct = firstType === 'SP'
   const shopifyVariants = design.variants.map((v) => {
-    const [w, h] = v.size.split('x')
-    const optionLabel =
-      v.productType === 'IB'
-        ? formatIbLabel(Number(w), Number(h))
-        : v.productType === 'MC'
-        ? `${Math.round(Number(v.size) / 10)} cm`
-        : v.size
+    let option1: string
+    let option2: string | undefined
+
+    if (v.productType === 'SP') {
+      option1 = spSizeLabel(v.size)
+      option2 = spMaterialLabel(v.material ?? '')
+    } else if (v.productType === 'IB') {
+      const [w, h] = v.size.split('x')
+      option1 = formatIbLabel(Number(w), Number(h))
+    } else {
+      // MC
+      option1 = `${Math.round(Number(v.size) / 10)} cm`
+    }
 
     return {
-      option1: optionLabel,
+      option1,
+      ...(option2 !== undefined ? { option2 } : {}),
       sku: v.sku,
       price: v.price?.toFixed(2) ?? '33.50',
       weight: v.weight ? Math.round(v.weight * 1000) : 300,
@@ -95,16 +114,34 @@ export async function buildShopifyProduct(designId: string) {
     }
   })
 
+  // Convert plain-text description to HTML paragraphs for Shopify
+  const toBodyHtml = (text: string | null): string => {
+    if (!text) return ''
+    return text
+      .split(/\n{2,}/)
+      .map((para) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+      .join('\n')
+  }
+
+  // SP needs two option definitions
+  const options = isSpProduct
+    ? [{ name: 'Formaat' }, { name: 'Materiaal' }]
+    : [{ name: 'Formaten' }]
+
+  // Build images array from saved mockups (Drive direct-download URLs)
+  const images = (design.mockups ?? []).map((m) => ({ src: m.driveUrl }))
+
   return {
     product: {
       title: design.designName,
-      body_html: nlContent.description ?? '',
+      body_html: toBodyHtml(nlContent.description),
       vendor: 'KitchenArt',
       product_type: productTypeLabel,
       tags: tags.join(', '),
       status: 'draft', // always create as draft first
-      options: [{ name: 'Formaten' }],
+      options,
       variants: shopifyVariants,
+      ...(images.length > 0 ? { images } : {}),
       metafields: [
         {
           namespace: 'custom',

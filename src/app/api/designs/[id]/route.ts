@@ -15,6 +15,9 @@ export async function GET(
         content: true,
         workflowSteps: {
           orderBy: { createdAt: 'asc' }
+        },
+        mockups: {
+          orderBy: { createdAt: 'asc' }
         }
       }
     })
@@ -54,7 +57,10 @@ export async function PATCH(
       include: {
         variants: true,
         content: true,
-        workflowSteps: true
+        workflowSteps: true,
+        mockups: {
+          orderBy: { createdAt: 'asc' }
+        }
       }
     })
     

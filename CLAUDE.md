@@ -1,14 +1,18 @@
-# Design Flow - Print-on-Demand Product Workflow System
+# Design Flow — Print-on-Demand Product Workflow System
 
 ## Overview
 
-A local web application that syncs designs from Notion, generates AI content, translates via DeepL, and manages Shopify product publishing.
+Full end-to-end pipeline for KitchenArt (kitchenart.nl):
+Notion design library → mockup generation (Photoshop JSX) → Google Drive storage → Shopify publishing with images → bulk publish → multi-language content (NL/DE/EN).
+
+**Local web UI** — Next.js 14 + SQLite (Prisma), runs on port 3000 (`npm run dev`).
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14 + TypeScript + Tailwind CSS
+- **Frontend**: Next.js 14 + TypeScript
 - **Database**: SQLite via Prisma ORM
-- **APIs**: Notion API, Claude Sonnet (Anthropic), DeepL, Shopify
+- **APIs**: Notion, Anthropic Claude Sonnet, Shopify Admin API, Google Drive
+- **Mockups**: Photoshop JSX (osascript), PSD/PSB templates
 - **Location**: `/Users/Michel/Desktop/Shopify/design-flow/`
 
 ## Project Structure
@@ -16,73 +20,136 @@ A local web application that syncs designs from Notion, generates AI content, tr
 ```
 design-flow/
 ├── prisma/
-│   ├── schema.prisma    # Database schema
-│   └── dev.db           # SQLite database
+│   ├── schema.prisma       # Database schema
+│   └── dev.db              # SQLite database
+├── scripts/
+│   └── generate-mockup.jsx # Photoshop JSX — fully working
 ├── src/
 │   ├── app/
-│   │   ├── api/         # API routes
-│   │   │   ├── notion/  # Notion sync
-│   │   │   ├── designs/ # CRUD operations
-│   │   │   └── ai/      # AI content generation
-│   │   ├── page.tsx     # Dashboard
-│   │   └── designs/[id]/page.tsx  # Design detail
+│   │   ├── api/
+│   │   │   ├── ai/generate/          # AI content generation (Claude vision)
+│   │   │   ├── brand-voice/          # Brand voice document management
+│   │   │   ├── designs/
+│   │   │   │   ├── [id]/route.ts     # GET/PATCH/DELETE design
+│   │   │   │   ├── [id]/content/     # PATCH — inline content edit per language
+│   │   │   │   ├── [id]/fork/        # POST — create copy for different productType
+│   │   │   │   ├── [id]/mockup/      # POST generate, GET status
+│   │   │   │   ├── [id]/publish/     # POST/GET — Shopify publish
+│   │   │   │   ├── [id]/translate/   # POST — NL → DE/EN
+│   │   │   │   ├── [id]/variants/    # POST — generate variants
+│   │   │   │   ├── analyze-image/    # POST — Claude vision on Drive image
+│   │   │   │   ├── approve/          # POST — bulk approve
+│   │   │   │   └── upload/           # POST — upload new design
+│   │   │   ├── notion/               # Notion sync
+│   │   │   ├── shopify/              # Shopify helpers
+│   │   │   └── workflow/
+│   │   │       ├── bulk/             # NL → DE → EN → variants pipeline
+│   │   │       └── bulk-publish/     # Bulk Shopify publish (APPROVED only)
+│   │   ├── brand-voice/              # Brand voice UI
+│   │   ├── upload/                   # Upload new design UI
+│   │   ├── page.tsx                  # Dashboard
+│   │   └── designs/[id]/page.tsx     # Design detail page
 │   └── lib/
-│       ├── prisma.ts    # DB client
-│       ├── notion.ts    # Notion client
-│       ├── ai.ts        # Claude Sonnet
-│       └── translation.ts  # DeepL
-├── .env                 # Environment variables
+│       ├── ai.ts             # Claude Sonnet — content generation
+│       ├── constants.ts      # Collections, sizes, pricing
+│       ├── drive.ts          # Google Drive — upload, list, base64 (resized via sharp)
+│       ├── env.ts            # Environment variable helpers
+│       ├── mockup-config.ts  # 44 PSD templates mapped (IB/SP/MC)
+│       ├── mockup.ts         # Mockup generation + altText helper
+│       ├── notion.ts         # Notion read/write
+│       ├── prisma.ts         # Prisma client
+│       ├── shopify.ts        # Shopify Admin API
+│       ├── translation.ts    # NL → DE/EN via Claude
+│       └── variants.ts       # Variant generation (IB/MC/SP sizes + pricing)
+├── public/
+├── .env                      # Environment variables (never commit)
 └── package.json
 ```
 
-## Data Models
+## Data Models (prisma/schema.prisma)
 
 ### Design
-- `notionId`: Notion page ID
-- `designCode`: Unique design identifier (e.g., "CALMM")
-- `designName`, `designType`, `styleFamily`
-- `inductionFriendly`, `circleFriendly`, `splashFriendly`: Boolean flags
-- `collections`, `colorTags`: JSON arrays
-- `status`: DRAFT | LIVE
-- `notionData`: Full Notion page JSON
+- `notionId`, `designCode`, `designName`, `designType`, `styleFamily`
+- `inductionFriendly`, `circleFriendly`, `splashFriendly`: product type flags
+- `collections`, `colorTags`: JSON arrays (strings)
+- `driveFileId`, `driveFileName`: source design file on Google Drive
+- `status`: DRAFT | REVIEW | APPROVED | LIVE | FAILED
 
 ### Variant
-- Links to Design
-- `sku`: Product SKU (e.g., "IB-CALMM-520-350")
-- `ean`: Product barcode
-- `productType`: IB (Induction) | MC (Circle) | SP (Splash)
-- `size`, `price`, `shopifyVariantId`
+- `productType`: IB | MC | SP
+- `sku`: e.g. `IB-CALMM-520-350`
+- `ean`: EAN-13 barcode
+- `size`, `material`, `price`, `weight`
+- `shopifyProductId`, `shopifyVariantId`
 
 ### Content
-- Links to Design
-- `language`: NL | DE | EN | FR
-- `title`, `description`, `seoTitle`, `seoDescription`, `altText`
-- `generatedAt`: Timestamp
+- `language`: nl | de | en | fr
+- `description`, `altText`, `seoTitle`, `seoDescription`
+- `translationStatus`
+
+### DesignMockup
+- `templateId`, `outputName`, `productType`
+- `driveFileId`, `driveUrl` (webContentLink)
+- `altText`: auto-generated deterministic alt text
 
 ### WorkflowStep
-- Tracks workflow progress per design
-- `step`: DESIGN_SYNC | CONTENT_GENERATED | TRANSLATED | VARIANTS_CREATED | PUBLISHED
-- `status`: pending | in_progress | completed | failed
+- `step`, `status`: pending | in_progress | completed | failed
 
 ## Key Integrations
 
 ### Notion Design Library
 - Database ID: `cdfd18fb-5193-4666-a885-b9e8d1c538bf`
-- Integration: "Design_Flow" (token in `.env`)
-- Fields: Design Name, Design Code, Design Type, Style Family, Collection, Color Tags, Live, Induction-friendly, Circle-friendly, Splash-friendly
+- Integration: "Design_Flow" (token in `.env` as `NOTION_TOKEN`)
+- Write-back: sets Live=true + Shopify URL after publish
+
+### Google Drive
+- Stores source design files + generated mockups
+- `drive.ts`: `getFileAsBase64()` resizes to max 1500×1500px via `sharp` before sending to Claude (avoids 5MB limit)
+- `driveUrl` stored as `webContentLink`; view URL built as `https://drive.google.com/file/d/{fileId}/view`
 
 ### Shopify
-- 405 products, 305 unique design codes
-- SKU structure: `{PREFIX}-{CODE}-{WIDTH}-{HEIGHT}`
-- Prefixes: IB (Inductiebeschermers), MC (Muurcirkels), SP (Spatschermen)
+- SKU structure: `{PREFIX}-{CODE}-{WIDTH}-{HEIGHT}` (IB/SP) or `{PREFIX}-{CODE}-{DIAMETER}` (MC)
+- Publishes as DRAFT; bulk publish only for APPROVED designs
+- Images: mockup `driveUrl` passed as `images[{ src }]` — Drive URL public access not yet verified
 
 ### Claude Sonnet (AI Content)
-- Generates: descriptions, alt-text, SEO titles/descriptions
-- Prompts in Dutch context
+- Content generation uses actual image (Claude vision) + brand voice document + product type
+- Translation: NL → DE, EN
+- Image resize: max 1500×1500px JPEG q85 via `sharp` before base64 encoding
 
-### DeepL (Translation)
-- NL ↔ DE (primary)
-- EN ↔ FR (planned)
+### Mockup Pipeline (Photoshop JSX)
+- Script: `scripts/generate-mockup.jsx`
+- Execution: `osascript -e 'tell application "Adobe Photoshop 2026" to do javascript file "..."'`
+- PNG input only — JPEG converted via `sips` first
+- PSB files must live alongside their PSDs
+- PSB canvas dimensions: IB=738×501px, SP=914×508px, MC=1000×1000px
+- 4 MC PSDs have broken SO named `'remove'` — handled by try/catch
+- **Never call `save()` on original PSDs** — works with copies only
+- 44 templates total: 13 IB (5 generic + 8 size-specific) + 19 SP + 12 MC
+
+### PSD Template Folders
+- `/Users/Michel/Desktop/Shopify/New Products/Mockups IB/` — 13 PSDs
+- `/Users/Michel/Desktop/Shopify/New Products/Mockups SP/` — 19 PSDs
+- `/Users/Michel/Desktop/Shopify/New Products/Mockups MC/` — 12 PSDs
+
+## Product Types & Sizes
+
+### IB — Inductiebeschermers
+- 19 standard sizes: 52×35cm → 91.6×52.7cm
+- Material: Vinyl texture overlay
+- SKU: `IB-{CODE}-{WIDTH_MM}-{HEIGHT_MM}`
+- Prices: €33.50–€37.50
+
+### SP — Spatschermen
+- Multiple sizes
+- Material: Aluminium-Dibond, matte coating (no vinyl texture)
+- SKU: `SP-{CODE}-{WIDTH_MM}-{HEIGHT_MM}`
+
+### MC — Muurcirkels
+- 4 diameters: 400, 600, 800, 1000mm
+- Material: Aluminium-Dibond, matte coating (no vinyl texture)
+- SKU: `MC-{CODE}-{DIAMETER_MM}`
+- Prices: €19.95–€44.95
 
 ## Environment Variables
 
@@ -90,60 +157,51 @@ design-flow/
 NOTION_TOKEN=ntn_...
 NOTION_DATABASE_ID=cdfd18fb-5193-4666-a885-b9e8d1c538bf
 ANTHROPIC_API_KEY=sk-ant-...
-DEEPL_API_KEY=...
 SHOPIFY_ACCESS_TOKEN=...
+SHOPIFY_STORE_DOMAIN=kitchenart.myshopify.com
+GOOGLE_SERVICE_ACCOUNT_KEY=...   # or path to JSON
+GOOGLE_DRIVE_FOLDER_ID=...
 ```
 
 ## Commands
 
 ```bash
-npm run dev          # Start development server
-npm run db:push      # Push schema changes
-npm run db:studio    # Open Prisma Studio
-npx prisma generate  # Generate Prisma client
+npm run dev              # Start development server (port 3000)
+npm run db:push          # Push schema changes (npx prisma db push)
+npm run db:studio        # Open Prisma Studio
+npx prisma generate      # Generate Prisma client
+kill $(lsof -t -i:3000)  # Kill stuck dev server
+rm -rf .next             # Wipe Next.js cache (then restart)
 ```
 
-## Workflow Steps
+## Workflow
 
-1. **Sync** - Pull designs from Notion Design Library
-2. **Generate** - Create AI content (NL descriptions)
-3. **Translate** - DeepL to DE (and future EN/FR)
-4. **Variants** - Create product variants with SKUs/EANs
-5. **Publish** - Push to Shopify
+1. **Upload** — drag design PNG/JPEG to `/upload`, AI analyses image, suggests collections/colors
+2. **Generate** — NL content via Claude vision (image + brand voice + product type)
+3. **Translate** — NL → DE, EN via Claude
+4. **Variants** — generate all SKU/EAN variants per product type
+5. **Mockups** — Photoshop generates JPEG mockups from PSDs, saved to Drive
+6. **Publish** — single design or bulk publish APPROVED designs to Shopify as DRAFT
+7. **Live** — Notion write-back sets Live=true + Shopify URL
 
-## Current Status
+## Completed Features
 
-- ✅ Full Notion sync: 291 designs, 0 errors
-- ✅ AI content generation (Claude Sonnet) working — tested on Taupe Mist (TAUPM)
-- ✅ Translation via Claude (NL → DE) working — DeepL optional when key is added
-- ✅ Variant generation (IB: 19 sizes, MC: 4 sizes) working — idempotent
-- ✅ Shopify product payload builder working — awaiting SHOPIFY_ACCESS_TOKEN
+- ✅ Full Notion sync (291 designs)
+- ✅ AI content generation with Claude vision
+- ✅ Multi-language: NL/DE/EN translation
+- ✅ Variant generation with EAN-13
+- ✅ Shopify publish (single + bulk for APPROVED)
+- ✅ Mockup pipeline via Photoshop JSX (44 templates, all working)
+- ✅ Google Drive integration (upload + thumbnails)
+- ✅ Upload page with AI-suggested collections (checkbox UI)
+- ✅ Design fork — copy design for different product type (IB/SP/MC)
+- ✅ Mockup section split: generic mockups + size-specific per variant
+- ✅ Alt-text auto-generation per mockup (`buildMockupAltText()`)
+- ✅ Content inline editing — NL/DE/EN cards editable in place
+- ✅ Image resize via sharp (fixes Claude 5MB base64 limit)
 
-### Translation
-- Primary: Claude Sonnet (works without DeepL key)
-- Fallback to DeepL when `DEEPL_API_KEY` is set in `.env`
-- Supported: NL → DE (EN, FR planned)
+## Known Issues / Backlog
 
-### Variant Sizes (IB)
-- 19 standard sizes from 52×35cm to 91.6×52.7cm
-- SKU format: `IB-{CODE}-{WIDTH_MM}-{HEIGHT_MM}` (e.g., `IB-TAUPM-520-350`)
-- Prices: €33.50–€37.50 based on size
-
-### Variant Sizes (MC)
-- 4 standard diameters: 400, 600, 800, 1000mm
-- SKU format: `MC-{CODE}-{DIAMETER_MM}` (e.g., `MC-TAUPM-600`)
-- Prices: €19.95–€44.95
-
-### API Routes
-- `POST /api/designs/[id]/variants` — generate variants from design flags
-- `GET  /api/designs/[id]/variants` — list variants grouped by type
-- `POST /api/designs/[id]/translate` — translate NL content to DE/EN/FR
-- `POST /api/designs/[id]/publish` — create draft product on Shopify (needs token)
-- `GET  /api/designs/[id]/publish` — preview Shopify payload (no token needed)
-
-### Next Steps
-1. Add `SHOPIFY_ACCESS_TOKEN` to `.env` → publishing becomes live
-2. Add `DEEPL_API_KEY` to `.env` → translations switch to DeepL
-3. EAN generation (GS1 API or manual assignment)
-4. Write-back to Notion (set Live = true after publish)
-5. UI: dashboard + bulk actions for new design batches
+- Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access not yet verified in production
+- Stijlfamilies auto-generate: API not yet built (group designs into style families via Claude, write back to Notion)
+- EN translation: works via Claude, but was only recently wired up

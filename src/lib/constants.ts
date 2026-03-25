@@ -81,3 +81,26 @@ export const MC_SIZES = [
   { diameter: 800,  price: 34.95, weightGrams: 600, label: '80 cm' },
   { diameter: 1000, price: 44.95, weightGrams: 900, label: '100 cm' },
 ] as const
+
+// SP (Spatscherm) materials. priceOffset is added on top of the base (G) price.
+export const SP_MATERIALS = [
+  { code: 'G',   label: 'Glas',              priceOffset: 0  },
+  { code: 'BH0', label: 'Brushed',           priceOffset: 5  },
+  { code: 'BH4', label: 'Brushed + 4mm',     priceOffset: 15 },
+] as const
+
+// SP sizes. price = base price for Glas (G). BH0 = price+5, BH4 = price+15.
+export const SP_SIZES = [
+  { width: 600,  height: 300,  priceG:  47.50, weightGrams: 680,  label: '60 × 30 cm' },
+  { width: 600,  height: 400,  priceG:  52.50, weightGrams: 800,  label: '60 × 40 cm' },
+  { width: 700,  height: 300,  priceG:  49.50, weightGrams: 800,  label: '70 × 30 cm' },
+  { width: 700,  height: 500,  priceG:  62.50, weightGrams: 1300, label: '70 × 50 cm' },
+  { width: 800,  height: 400,  priceG:  59.50, weightGrams: 1200, label: '80 × 40 cm' },
+  { width: 800,  height: 550,  priceG:  72.50, weightGrams: 1700, label: '80 × 55 cm' },
+  { width: 900,  height: 450,  priceG:  67.50, weightGrams: 1600, label: '90 × 45 cm' },
+  { width: 900,  height: 600,  priceG:  84.50, weightGrams: 2000, label: '90 × 60 cm' },
+  { width: 1000, height: 500,  priceG:  79.50, weightGrams: 2000, label: '100 × 50 cm' },
+  { width: 1000, height: 650,  priceG:  99.50, weightGrams: 2500, label: '100 × 65 cm' },
+  { width: 1200, height: 600,  priceG: 114.50, weightGrams: 2800, label: '120 × 60 cm' },
+  { width: 1200, height: 800,  priceG: 154.50, weightGrams: 3700, label: '120 × 80 cm' },
+] as const

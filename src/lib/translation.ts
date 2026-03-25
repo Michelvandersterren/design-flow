@@ -46,7 +46,29 @@ ${JSON.stringify(texts, null, 2)}`
     throw new Error('Claude did not return valid JSON for translation')
   }
 
-  const parsed = JSON.parse(jsonMatch[0])
+  const jsonStr = jsonMatch[0]
+
+  // Probeer eerst gewone JSON.parse
+  let parsed: Record<string, string | null> = {}
+  try {
+    parsed = JSON.parse(jsonStr)
+  } catch {
+    // JSON.parse faalt als Claude typografische aanhalingstekens (zoals „...") gebruikt
+    // in de vertaalde tekst. Extraheer de velden direct via regex als fallback.
+    const extractField = (key: string): string | null => {
+      // Match "key": "..." — stopt bij de volgende ,\n" of }
+      const re = new RegExp(`"${key}":\\s*"([\\s\\S]*?)"(?=\\s*[,}\\n])`)
+      const m = jsonStr.match(re)
+      return m ? m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : null
+    }
+    parsed = {
+      description: extractField('description'),
+      altText: extractField('altText'),
+      seoTitle: extractField('seoTitle'),
+      seoDescription: extractField('seoDescription'),
+    }
+  }
+
   return {
     description: parsed.description ?? texts.description,
     altText: parsed.altText ?? texts.altText,

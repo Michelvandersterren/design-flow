@@ -4,13 +4,16 @@ import { prisma } from '@/lib/prisma'
 
 export async function POST(request: NextRequest) {
   try {
-    const { action } = await request.json()
-    
+    const body = await request.json()
+    const { action, designCode } = body
+
     switch (action) {
       case 'sync_all':
         return await syncAllDesigns()
       case 'sync_single':
-        const { designCode } = await request.json()
+        if (!designCode) {
+          return NextResponse.json({ error: 'designCode is required for sync_single' }, { status: 400 })
+        }
         return await syncSingleDesign(designCode)
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
@@ -19,6 +22,18 @@ export async function POST(request: NextRequest) {
     console.error('Notion sync error:', error)
     return NextResponse.json({ error: 'Sync failed' }, { status: 500 })
   }
+}
+
+// Bepaal welke status te gebruiken bij een sync-update.
+// Notion is leidend voor LIVE, maar overschrijft nooit lokale voortgang
+// (REVIEW, APPROVED, LIVE blijven staan tenzij Notion zegt LIVE).
+function resolveStatus(notionLiveStatus: string, existingStatus: string | null): string {
+  if (notionLiveStatus === 'LIVE') return 'LIVE'
+  // Bewaar lokale voortgang — niet terugzetten naar DRAFT
+  if (existingStatus && ['REVIEW', 'APPROVED', 'LIVE'].includes(existingStatus)) {
+    return existingStatus
+  }
+  return 'DRAFT'
 }
 
 async function syncAllDesigns() {
@@ -47,19 +62,6 @@ async function syncAllDesigns() {
     
     if (!design.designCode) continue
     
-    const baseData = {
-      designName: design.designName,
-      designType: design.designType,
-      styleFamily: design.styleFamily,
-      collections: JSON.stringify(design.collections),
-      colorTags: JSON.stringify(design.colorTags),
-      inductionFriendly: design.inductionFriendly,
-      circleFriendly: design.circleFriendly,
-      splashFriendly: design.splashFriendly,
-      notionData: JSON.stringify(design),
-      status: design.liveStatus === 'LIVE' ? 'LIVE' : 'DRAFT',
-    }
-
     try {
       const existingByNotion = await prisma.design.findFirst({
         where: { 
@@ -69,6 +71,19 @@ async function syncAllDesigns() {
           ]
         }
       })
+
+      const baseData = {
+        designName: design.designName,
+        designType: design.designType,
+        styleFamily: design.styleFamily,
+        collections: JSON.stringify(design.collections),
+        colorTags: JSON.stringify(design.colorTags),
+        inductionFriendly: design.inductionFriendly,
+        circleFriendly: design.circleFriendly,
+        splashFriendly: design.splashFriendly,
+        notionData: JSON.stringify(design),
+        status: resolveStatus(design.liveStatus, existingByNotion?.status ?? null),
+      }
 
       if (existingByNotion) {
         await prisma.design.update({
@@ -153,7 +168,8 @@ async function syncSingleDesign(designCode: string) {
         circleFriendly: design.circleFriendly,
         splashFriendly: design.splashFriendly,
         notionData: JSON.stringify(design),
-        status: design.liveStatus === 'LIVE' ? 'LIVE' : 'DRAFT',
+        notionId: design.id,
+        status: resolveStatus(design.liveStatus, existing.status),
       }
     })
     
@@ -172,7 +188,7 @@ async function syncSingleDesign(designCode: string) {
         circleFriendly: design.circleFriendly,
         splashFriendly: design.splashFriendly,
         notionData: JSON.stringify(design),
-        status: design.liveStatus === 'LIVE' ? 'LIVE' : 'DRAFT',
+        status: resolveStatus(design.liveStatus, null),
       }
     })
     
