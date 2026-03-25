@@ -84,6 +84,7 @@ export const MC_TEMPLATES: MockupTemplate[] = [
  * Returns templates for a product type, optionally including size-specific ones.
  * Without sizeKey: returns only generic (non-size-specific) templates.
  * With sizeKey: returns generic templates + the matching size-specific template.
+ * With sizeKey='all': returns ALL templates (generic + all size-specific).
  */
 export function getTemplatesForProduct(
   productType: 'IB' | 'SP' | 'MC',
@@ -93,6 +94,10 @@ export function getTemplatesForProduct(
     : productType === 'SP' ? SP_TEMPLATES
     : MC_TEMPLATES
 
+  if (sizeKey === 'all') {
+    return all
+  }
+
   if (sizeKey) {
     const specific = all.filter((t) => t.sizeKey === sizeKey)
     const generic = all.filter((t) => !t.sizeKey)
@@ -100,4 +105,15 @@ export function getTemplatesForProduct(
   }
 
   return all.filter((t) => !t.sizeKey)
+}
+
+/**
+ * Returns only the size-specific templates for a product type.
+ * Useful for generating all size-specific mockups in one pass.
+ */
+export function getSizeSpecificTemplates(productType: 'IB' | 'SP' | 'MC'): MockupTemplate[] {
+  const all = productType === 'IB' ? IB_TEMPLATES
+    : productType === 'SP' ? SP_TEMPLATES
+    : MC_TEMPLATES
+  return all.filter((t) => !!t.sizeKey)
 }

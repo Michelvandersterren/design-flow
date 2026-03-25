@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { generateMockupsForDesign, checkTemplateStatus } from '@/lib/mockup'
+import { generateMockupsForDesign, generateSizeSpecificMockupsForDesign, checkTemplateStatus } from '@/lib/mockup'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -7,7 +7,9 @@ import { prisma } from '@/lib/prisma'
  * Generate mockups for a design.
  *
  * Body (optional):
- *   { sizeKey?: string }  — e.g. "600x300" to also generate size-specific mockup
+ *   {}                            — generate generic templates only
+ *   { sizeKey: "600x300" }        — generate generic + one size-specific template
+ *   { sizeKey: "all-size-specific" } — generate all size-specific templates for all variants
  *
  * Returns list of generated mockups with Drive URLs.
  */
@@ -20,7 +22,12 @@ export async function POST(
     const body = await request.json().catch(() => ({}))
     const sizeKey: string | undefined = body?.sizeKey
 
-    const results = await generateMockupsForDesign(designId, sizeKey)
+    let results
+    if (sizeKey === 'all-size-specific') {
+      results = await generateSizeSpecificMockupsForDesign(designId)
+    } else {
+      results = await generateMockupsForDesign(designId, sizeKey)
+    }
 
     const generated = results.filter((r) => !r.skipped)
     const skipped = results.filter((r) => r.skipped)

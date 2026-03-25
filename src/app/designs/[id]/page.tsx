@@ -86,6 +86,7 @@ export default function DesignDetail() {
   const [forking, setForking] = useState(false)
   const [shopifyPreview, setShopifyPreview] = useState<{ shopifyConfigured: boolean; payload?: unknown } | null>(null)
   const [generatingMockups, setGeneratingMockups] = useState(false)
+  const [generatingSizeSpecific, setGeneratingSizeSpecific] = useState(false)
   const [mockupProgress, setMockupProgress] = useState<{ current: number; total: number } | null>(null)
   const [newMockupResults, setNewMockupResults] = useState<MockupGenerateResult[] | null>(null)
   const [mockupStatus, setMockupStatus] = useState<{ readyCount: number; totalCount: number; templates: { id: string; file: string; ready: boolean }[] } | null>(null)
@@ -786,12 +787,39 @@ export default function DesignDetail() {
               {/* Size-specific mockups per variant */}
               {design.variants.length > 0 && (
                 <div>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
-                    Maat-specifieke mockups
-                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, margin: 0 }}>
+                      Maat-specifieke mockups
+                    </p>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12 }}
+                      onClick={generateSizeSpecificMockups}
+                      disabled={generatingSizeSpecific || generatingMockups || design.variants.length === 0}
+                      title="Genereer maat-specifieke mockups voor alle varianten in één keer"
+                    >
+                      {generatingSizeSpecific
+                        ? 'Bezig...'
+                        : (() => {
+                            const sizeSpecificCount = (design.mockups ?? []).filter((m) =>
+                              design.variants.some((v) =>
+                                m.templateId.includes(v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
+                              )
+                            ).length
+                            return sizeSpecificCount > 0
+                              ? `Maat-mockups opnieuw genereren (${sizeSpecificCount} opgeslagen)`
+                              : 'Alle maat-specifieke mockups genereren'
+                          })()
+                      }
+                    </button>
+                  </div>
+                  {generatingSizeSpecific && (
+                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+                      Photoshop werkt aan maat-specifieke mockups... (kan enkele minuten duren)
+                    </p>
+                  )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {design.variants.map((v) => {
-                      // sizeKey format: e.g. "500x350" from size "500x350 mm"
                       const sizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
                       const sizeSpecificMockups = (design.mockups ?? []).filter(
                         (m) => m.templateId.includes(sizeKey)
@@ -803,32 +831,6 @@ export default function DesignDetail() {
                               {v.productType} — {v.size}
                             </span>
                             <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.sku}</span>
-                            {sizeSpecificMockups.length === 0 && (
-                              <button
-                                className="btn btn-secondary"
-                                style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
-                                onClick={async () => {
-                                  setGeneratingMockups(true)
-                                  try {
-                                    const res = await fetch(`/api/designs/${params.id}/mockup`, {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ sizeKey }),
-                                    })
-                                    const data = await res.json()
-                                    if (data.results) {
-                                      setNewMockupResults((prev) => [...(prev ?? []), ...data.results])
-                                      fetchDesign()
-                                    }
-                                  } finally {
-                                    setGeneratingMockups(false)
-                                  }
-                                }}
-                                disabled={generatingMockups}
-                              >
-                                Genereer mockup
-                              </button>
-                            )}
                           </div>
                           {sizeSpecificMockups.length > 0 ? (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
