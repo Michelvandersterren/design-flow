@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['@prisma/client', '@notionhq/client'],
-  },
+  serverExternalPackages: ['@prisma/client', '@notionhq/client'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'drive.google.com' },
