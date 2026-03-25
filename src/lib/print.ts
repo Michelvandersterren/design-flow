@@ -3,19 +3,18 @@ import fs from 'fs'
 import os from 'os'
 import { spawn } from 'child_process'
 import { prisma } from './prisma'
-import { getFileAsBase64, uploadPrintFileToDrive } from './drive'
-import { getPrintTemplateForSize, getAllPrintTemplates, buildPrintFileName } from './print-config'
+import { uploadPrintFileToDrive } from './drive'
+import { getPrintTemplateForSize, buildPrintFileName } from './print-config'
 import type { PrintTemplate } from './print-config'
 
-const JSX_SCRIPT   = path.join(process.cwd(), 'scripts', 'generate-print.jsx')
-const CONFIG_PATH  = '/tmp/print-job.json'
-const RESULT_PATH  = '/tmp/print-job-result.json'
-const OUT_DIR      = path.join(os.tmpdir(), 'print-out')
+const JSX_SCRIPT        = path.join(process.cwd(), 'scripts', 'generate-print.jsx')
+const BATCH_CONFIG_PATH = '/tmp/print-batch-job.json'
+const BATCH_RESULT_PATH = '/tmp/print-batch-result.json'
+const OUT_DIR           = path.join(os.tmpdir(), 'print-out')
 
-// How long to wait for Illustrator to finish one PDF (ms)
-// Illustrator is slower than Photoshop on large documents — allow 8 minutes
-const AI_TIMEOUT_MS   = 8 * 60 * 1000
-const POLL_INTERVAL_MS = 2_000
+// One Illustrator session for all PDFs — allow 10 minutes total
+const AI_TIMEOUT_MS    = 10 * 60 * 1000
+const POLL_INTERVAL_MS = 3_000
 
 export interface PrintFileResult {
   sizeKey: string
@@ -28,73 +27,82 @@ export interface PrintFileResult {
   skipReason?: string
 }
 
+interface BatchJobItem {
+  sizeKey: string
+  designPath: string
+  outPath: string
+  widthMM: number
+  heightMM: number
+}
+
 /**
- * Generate a single print PDF via Adobe Illustrator (osascript).
+ * Run ALL print PDFs for a design in a single Illustrator session.
  *
- * The JSX script reads /tmp/print-job.json and writes the result to
- * /tmp/print-job-result.json when done. We poll for that file.
+ * The JSX script reads /tmp/print-batch-job.json (array of jobs) and
+ * processes them one by one, writing each PDF as it goes.
+ * We poll until ALL output files exist.
  */
-async function generatePrintViaIllustrator(
-  designImageBuffer: Buffer,
-  template: PrintTemplate,
+async function generateBatchViaIllustrator(
+  jobs: BatchJobItem[],
   designCode: string
-): Promise<string> {
+): Promise<void> {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true })
 
-  // Write design image to a temp JPEG file.
-  // Illustrator accepts JPEG, PNG, TIFF, PDF — JPEG is the most reliable.
-  const designTempPath = path.join(os.tmpdir(), `print-design-${designCode}.jpg`)
-  fs.writeFileSync(designTempPath, designImageBuffer)
+  // Remove any stale output PDFs for this run
+  for (const job of jobs) {
+    if (fs.existsSync(job.outPath)) fs.unlinkSync(job.outPath)
+  }
+  if (fs.existsSync(BATCH_RESULT_PATH)) fs.unlinkSync(BATCH_RESULT_PATH)
 
-  const outFileName = buildPrintFileName('IB', designCode, template.widthMM, template.heightMM)
-  const outPath     = path.join(OUT_DIR, outFileName)
+  // Write batch config
+  fs.writeFileSync(BATCH_CONFIG_PATH, JSON.stringify({ jobs }))
 
-  // Write job config
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify({
-    psdPath:    template.psdPath,   // only used for dimension reference — filename is source of truth
-    designPath: designTempPath,
-    outPath,
-    widthMM:    template.widthMM,
-    heightMM:   template.heightMM,
-  }))
+  // Write AppleScript with generous timeout (10 min)
+  const appleScriptPath = path.join(os.tmpdir(), `print-batch-${designCode}.applescript`)
+  fs.writeFileSync(appleScriptPath, [
+    `with timeout of 600 seconds`,
+    `  tell application "Adobe Illustrator"`,
+    `    do javascript file "${JSX_SCRIPT}"`,
+    `  end tell`,
+    `end timeout`,
+  ].join('\n'), 'utf-8')
 
-  // Remove stale result file
-  if (fs.existsSync(RESULT_PATH)) fs.unlinkSync(RESULT_PATH)
-
-  // Fire osascript — Illustrator will run the JSX and write result when done
-  // We capture stderr so errors from osascript/Illustrator are visible in Next.js logs.
-  const jsxEscaped = JSX_SCRIPT.replace(/"/g, '\\"')
-  const child = spawn(
-    'osascript',
-    ['-e', `tell application "Adobe Illustrator" to do javascript file "${jsxEscaped}"`],
-    { detached: false, stdio: ['ignore', 'ignore', 'pipe'] }
-  )
+  const child = spawn('osascript', [appleScriptPath], {
+    detached: false,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
   child.stderr?.on('data', (d: Buffer) => {
     console.error('[print osascript stderr]', d.toString())
   })
 
-  // Poll for success: the output PDF exists and has content.
-  // The JSX result file is unreliable (Illustrator File.write() flushes 0 bytes on
-  // some systems), so we use the output PDF itself as the primary success signal.
+  // Poll until ALL expected PDFs exist, or result file signals an early error
   const deadline = Date.now() + AI_TIMEOUT_MS
   await new Promise<void>((resolve, reject) => {
     const interval = setInterval(() => {
       try {
-        // Primary: PDF was written successfully
-        if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+        // Check if batch result file exists (error signal from JSX)
+        if (fs.existsSync(BATCH_RESULT_PATH) && fs.statSync(BATCH_RESULT_PATH).size > 0) {
           clearInterval(interval)
           resolve()
           return
         }
-        // Early error signal: result file has content (JSX error path wrote something)
-        if (fs.existsSync(RESULT_PATH) && fs.statSync(RESULT_PATH).size > 0) {
+        // Check if all output PDFs exist and have content
+        const allDone = jobs.every(
+          (j) => fs.existsSync(j.outPath) && fs.statSync(j.outPath).size > 0
+        )
+        if (allDone) {
           clearInterval(interval)
           resolve()
           return
         }
+        const doneSoFar = jobs.filter(
+          (j) => fs.existsSync(j.outPath) && fs.statSync(j.outPath).size > 0
+        ).length
+        console.log(`[print] ${doneSoFar}/${jobs.length} PDFs gereed...`)
+
         if (Date.now() > deadline) {
           clearInterval(interval)
-          reject(new Error(`Illustrator timeout na ${AI_TIMEOUT_MS / 1000}s — geen PDF gegenereerd`))
+          reject(new Error(`Illustrator timeout — slechts ${doneSoFar}/${jobs.length} PDFs gegenereerd`))
         }
       } catch {
         // statSync can throw transiently — keep polling
@@ -102,102 +110,31 @@ async function generatePrintViaIllustrator(
     }, POLL_INTERVAL_MS)
   })
 
-  // Check for explicit error written by JSX (if result file has content)
-  if (fs.existsSync(RESULT_PATH) && fs.statSync(RESULT_PATH).size > 0) {
+  // Check for batch result error
+  if (fs.existsSync(BATCH_RESULT_PATH) && fs.statSync(BATCH_RESULT_PATH).size > 0) {
     try {
-      const raw = fs.readFileSync(RESULT_PATH, 'utf-8')
-      console.log('[print result raw]', raw)
+      const raw = fs.readFileSync(BATCH_RESULT_PATH, 'utf-8')
+      console.log('[print batch result]', raw)
       const parsed = JSON.parse(raw)
       if (!parsed.success) {
-        throw new Error(`Illustrator fout: ${parsed.error}`)
+        throw new Error(`Illustrator batch fout: ${parsed.error}`)
       }
-    } catch (parseErr) {
-      if (parseErr instanceof SyntaxError) {
-        console.warn('[print] Could not parse result JSON, ignoring:', parseErr.message)
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        console.warn('[print] Could not parse batch result JSON, continuing')
       } else {
-        throw parseErr
+        throw e
       }
     }
   }
 
-  // Verify the PDF was actually created
-  if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
-    throw new Error(`Illustrator heeft geen PDF gegenereerd op: ${outPath}`)
-  }
-
-  // Clean up temp design file
-  try { fs.unlinkSync(designTempPath) } catch (_) {}
-
-  return outPath
+  // Clean up
+  try { fs.unlinkSync(appleScriptPath) } catch (_) {}
 }
 
 /**
- * Generate and save a single print PDF for one size variant.
- */
-async function generateAndSaveSinglePrintFile(
-  designId: string,
-  designCode: string,
-  productType: 'IB' | 'SP' | 'MC',
-  designBuffer: Buffer,
-  template: PrintTemplate
-): Promise<PrintFileResult> {
-  try {
-    const outPath = await generatePrintViaIllustrator(designBuffer, template, designCode)
-
-    const pdfBuffer  = fs.readFileSync(outPath)
-    const fileName   = buildPrintFileName(productType, designCode, template.widthMM, template.heightMM)
-
-    const uploaded = await uploadPrintFileToDrive(
-      pdfBuffer,
-      fileName,
-      designCode
-    )
-
-    try { fs.unlinkSync(outPath) } catch (_) {}
-
-    // Upsert in DB — one row per design+sizeKey
-    await prisma.designPrintFile.deleteMany({
-      where: { designId, sizeKey: template.sizeKey },
-    })
-    await prisma.designPrintFile.create({
-      data: {
-        designId,
-        productType,
-        sizeKey:     template.sizeKey,
-        widthMM:     template.widthMM,
-        heightMM:    template.heightMM,
-        fileName,
-        driveFileId: uploaded.fileId,
-        driveUrl:    uploaded.webViewLink,
-      },
-    })
-
-    return {
-      sizeKey:     template.sizeKey,
-      widthMM:     template.widthMM,
-      heightMM:    template.heightMM,
-      driveFileId: uploaded.fileId,
-      driveUrl:    uploaded.webViewLink,
-      fileName,
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return {
-      sizeKey:     template.sizeKey,
-      widthMM:     template.widthMM,
-      heightMM:    template.heightMM,
-      driveFileId: '',
-      driveUrl:    '',
-      fileName:    buildPrintFileName(productType, designCode, template.widthMM, template.heightMM),
-      skipped:     true,
-      skipReason:  `Fout bij genereren: ${msg}`,
-    }
-  }
-}
-
-/**
- * Generate print PDFs for all size variants of a design.
- * Only generates for sizes that have a matching PSD template.
+ * Generate print PDFs for all size variants of a design in one Illustrator session,
+ * then upload all to Drive in parallel.
  */
 export async function generateAllPrintFilesForDesign(designId: string): Promise<PrintFileResult[]> {
   const design = await prisma.design.findUnique({
@@ -211,65 +148,105 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
   const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
   if (!productType) throw new Error('Geen producttype gevonden — genereer eerst varianten')
   if (productType !== 'IB') {
-    return [{
-      sizeKey: '', widthMM: 0, heightMM: 0,
-      driveFileId: '', driveUrl: '', fileName: '',
-      skipped: true,
-      skipReason: `Printbestanden nog niet ondersteund voor ${productType}`,
-    }]
+    return [{ sizeKey: '', widthMM: 0, heightMM: 0, driveFileId: '', driveUrl: '', fileName: '',
+      skipped: true, skipReason: `Printbestanden nog niet ondersteund voor ${productType}` }]
   }
 
-  // Collect unique variant sizeKeys
+  // Unique variant sizeKeys
   const variantSizeKeys = [...new Set(
     design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
   )]
 
-  // Match each variant sizeKey to a print template (exact match only)
-  const jobs: PrintTemplate[] = []
+  // Match to print templates
+  const templates: PrintTemplate[] = []
   for (const sizeKey of variantSizeKeys) {
     const tmpl = getPrintTemplateForSize('IB', sizeKey)
-    if (tmpl) {
-      jobs.push(tmpl)
-    }
+    if (tmpl) templates.push(tmpl)
   }
 
-  if (jobs.length === 0) {
-    return [{
-      sizeKey: '', widthMM: 0, heightMM: 0,
-      driveFileId: '', driveUrl: '', fileName: '',
-      skipped: true,
-      skipReason: 'Geen print templates gevonden voor de varianten van dit design',
-    }]
+  if (templates.length === 0) {
+    return [{ sizeKey: '', widthMM: 0, heightMM: 0, driveFileId: '', driveUrl: '', fileName: '',
+      skipped: true, skipReason: 'Geen print templates gevonden voor de varianten van dit design' }]
   }
 
-  // Download design image once (original quality — not resized, Illustrator needs full res)
+  // Download design image once (full resolution — no resize for Illustrator)
   const designBuffer = await getDesignImageBuffer(design.driveFileId)
+  const designTempPath = path.join(os.tmpdir(), `print-design-${design.designCode}.jpg`)
+  fs.writeFileSync(designTempPath, designBuffer)
 
-  const results: PrintFileResult[] = []
-  for (const template of jobs) {
-    const result = await generateAndSaveSinglePrintFile(
-      designId, design.designCode, productType, designBuffer, template
-    )
-    results.push(result)
+  // Build batch jobs
+  const batchJobs: BatchJobItem[] = templates.map((tmpl) => ({
+    sizeKey:    tmpl.sizeKey,
+    designPath: designTempPath,
+    outPath:    path.join(OUT_DIR, buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)),
+    widthMM:    tmpl.widthMM,
+    heightMM:   tmpl.heightMM,
+  }))
+
+  // Generate all PDFs in one Illustrator session
+  try {
+    await generateBatchViaIllustrator(batchJobs, design.designCode)
+  } finally {
+    try { fs.unlinkSync(designTempPath) } catch (_) {}
   }
+
+  // Upload all to Drive in parallel, save to DB
+  const results = await Promise.all(
+    templates.map(async (tmpl, i): Promise<PrintFileResult> => {
+      const job      = batchJobs[i]
+      const fileName = buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)
+      try {
+        if (!fs.existsSync(job.outPath) || fs.statSync(job.outPath).size === 0) {
+          return { sizeKey: tmpl.sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+            driveFileId: '', driveUrl: '', fileName,
+            skipped: true, skipReason: 'Illustrator heeft geen PDF gegenereerd voor dit formaat' }
+        }
+
+        const pdfBuffer = fs.readFileSync(job.outPath)
+        const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, design.designCode)
+        try { fs.unlinkSync(job.outPath) } catch (_) {}
+
+        // Upsert DB row
+        await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey: tmpl.sizeKey } })
+        await prisma.designPrintFile.create({
+          data: {
+            designId,
+            productType,
+            sizeKey:     tmpl.sizeKey,
+            widthMM:     tmpl.widthMM,
+            heightMM:    tmpl.heightMM,
+            fileName,
+            driveFileId: uploaded.fileId,
+            driveUrl:    uploaded.webViewLink,
+          },
+        })
+
+        return {
+          sizeKey:     tmpl.sizeKey,
+          widthMM:     tmpl.widthMM,
+          heightMM:    tmpl.heightMM,
+          driveFileId: uploaded.fileId,
+          driveUrl:    uploaded.webViewLink,
+          fileName,
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { sizeKey: tmpl.sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+          driveFileId: '', driveUrl: '', fileName,
+          skipped: true, skipReason: `Fout bij uploaden: ${msg}` }
+      }
+    })
+  )
 
   // Mark workflow step
   const successCount = results.filter((r) => !r.skipped).length
   if (successCount > 0) {
     await prisma.workflowStep.upsert({
-      where: { designId_step: { designId, step: 'PRINT_GENERATION' } },
-      create: {
-        designId,
-        step: 'PRINT_GENERATION',
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        data: JSON.stringify({ printFiles: successCount }),
-      },
-      update: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        data: JSON.stringify({ printFiles: successCount }),
-      },
+      where:  { designId_step: { designId, step: 'PRINT_GENERATION' } },
+      create: { designId, step: 'PRINT_GENERATION', status: 'COMPLETED',
+                completedAt: new Date(), data: JSON.stringify({ printFiles: successCount }) },
+      update: { status: 'COMPLETED', completedAt: new Date(),
+                data: JSON.stringify({ printFiles: successCount }) },
     })
   }
 
@@ -278,6 +255,7 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
 
 /**
  * Regenerate a single print file for a specific sizeKey.
+ * Still uses the batch infrastructure (batch of 1) for consistency.
  */
 export async function regenerateSinglePrintFile(
   designId: string,
@@ -294,14 +272,55 @@ export async function regenerateSinglePrintFile(
   const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
   if (!productType) throw new Error('Geen producttype gevonden')
 
-  const template = getPrintTemplateForSize('IB', sizeKey)
-  if (!template) throw new Error(`Geen print template gevonden voor sizeKey: ${sizeKey}`)
+  const tmpl = getPrintTemplateForSize('IB', sizeKey)
+  if (!tmpl) throw new Error(`Geen print template gevonden voor sizeKey: ${sizeKey}`)
 
-  const designBuffer = await getDesignImageBuffer(design.driveFileId)
+  const designBuffer   = await getDesignImageBuffer(design.driveFileId)
+  const designTempPath = path.join(os.tmpdir(), `print-design-${design.designCode}.jpg`)
+  fs.writeFileSync(designTempPath, designBuffer)
 
-  return generateAndSaveSinglePrintFile(
-    designId, design.designCode, productType, designBuffer, template
-  )
+  const fileName = buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)
+  const outPath  = path.join(OUT_DIR, fileName)
+
+  const batchJobs: BatchJobItem[] = [{
+    sizeKey:    tmpl.sizeKey,
+    designPath: designTempPath,
+    outPath,
+    widthMM:    tmpl.widthMM,
+    heightMM:   tmpl.heightMM,
+  }]
+
+  try {
+    await generateBatchViaIllustrator(batchJobs, design.designCode)
+  } finally {
+    try { fs.unlinkSync(designTempPath) } catch (_) {}
+  }
+
+  if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
+    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+      driveFileId: '', driveUrl: '', fileName,
+      skipped: true, skipReason: 'Illustrator heeft geen PDF gegenereerd' }
+  }
+
+  try {
+    const pdfBuffer = fs.readFileSync(outPath)
+    const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, design.designCode)
+    try { fs.unlinkSync(outPath) } catch (_) {}
+
+    await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey } })
+    await prisma.designPrintFile.create({
+      data: { designId, productType, sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+              fileName, driveFileId: uploaded.fileId, driveUrl: uploaded.webViewLink },
+    })
+
+    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+             driveFileId: uploaded.fileId, driveUrl: uploaded.webViewLink, fileName }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
+      driveFileId: '', driveUrl: '', fileName,
+      skipped: true, skipReason: `Fout bij uploaden: ${msg}` }
+  }
 }
 
 /**
@@ -314,7 +333,6 @@ export async function deleteAllPrintFilesForDesign(designId: string): Promise<nu
 
 /**
  * Download design image from Drive at full resolution (no resize).
- * Used for print generation where Illustrator needs the full resolution image.
  */
 async function getDesignImageBuffer(driveFileId: string): Promise<Buffer> {
   const { google } = await import('googleapis')
