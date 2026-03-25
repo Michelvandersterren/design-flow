@@ -291,6 +291,30 @@ export default function DesignDetail() {
     }
   }
 
+  const generateSizeSpecificMockups = async () => {
+    if (!design) return
+    setGeneratingSizeSpecific(true)
+    setNewMockupResults(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/mockup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sizeKey: 'all-size-specific' }),
+      })
+      const data = await res.json()
+      if (data.results) {
+        setNewMockupResults((prev) => [...(prev ?? []), ...data.results])
+        fetchDesign()
+      } else {
+        alert('Maat-specifieke mockups mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch {
+      alert('Fout bij maat-specifieke mockup generatie')
+    } finally {
+      setGeneratingSizeSpecific(false)
+    }
+  }
+
   const openEditMode = () => {
     if (!design) return
     setEditForm({

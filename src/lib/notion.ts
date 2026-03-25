@@ -85,6 +85,24 @@ export async function markDesignLiveInNotion(
 }
 
 /**
+ * Schrijft een stijlfamilie terug naar het "Style Family" select-veld in Notion.
+ * Gebruik na automatische groepering via Claude.
+ */
+export async function updateStyleFamilyInNotion(
+  notionPageId: string,
+  styleFamily: string
+): Promise<void> {
+  await notion.pages.update({
+    page_id: notionPageId,
+    properties: {
+      'Style Family': {
+        select: { name: styleFamily },
+      },
+    },
+  } as any)
+}
+
+/**
  * Zet het "Live on KitchenArt NL?" status-veld op "Not Online".
  */
 export async function markDesignOfflineInNotion(notionPageId: string): Promise<void> {
