@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
         status: design.status,
         driveFileId: driveResult.fileId,
         driveFileName: driveResult.fileName,
-        thumbnailUrl: `https://drive.google.com/thumbnail?id=${driveResult.fileId}&sz=w400`,
+        thumbnailUrl: `https://drive.usercontent.google.com/download?id=${driveResult.fileId}&export=view`,
       },
     })
   } catch (error) {

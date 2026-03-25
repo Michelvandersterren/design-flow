@@ -4,7 +4,7 @@ import os from 'os'
 import { spawn, execSync } from 'child_process'
 import { prisma } from './prisma'
 import { getFileAsBase64, uploadDesignToDrive } from './drive'
-import { getTemplatesForProduct, getSizeSpecificTemplates, getTemplateById } from './mockup-config'
+import { getTemplatesForProduct, getSizeSpecificTemplates, getTemplateById, IB_SIZE_KEY_ALIASES } from './mockup-config'
 import type { MockupTemplate } from './mockup-config'
 
 const JSX_SCRIPT = path.join(process.cwd(), 'scripts', 'generate-mockup.jsx')
@@ -121,6 +121,10 @@ function buildDriveFilename(designCode: string, productType: string, outputName:
 /**
  * Generate and save a single mockup template for a design.
  * Used both by batch generation and per-template regeneration.
+ *
+ * @param saveSizeKey  The original variant sizeKey to store in DB. When provided,
+ *                     this overrides template.sizeKey so the UI can match
+ *                     m.sizeKey === vSizeKey even when an alias was used for PSD lookup.
  */
 async function generateAndSaveSingleMockup(
   designId: string,
@@ -128,7 +132,8 @@ async function generateAndSaveSingleMockup(
   designName: string,
   productType: 'IB' | 'SP' | 'MC',
   designBuffer: Buffer,
-  template: MockupTemplate
+  template: MockupTemplate,
+  saveSizeKey?: string
 ): Promise<MockupResult> {
   try {
     const outPath = await generateMockupViaPhotoshop(designBuffer, template, designCode)
@@ -147,9 +152,15 @@ async function generateAndSaveSingleMockup(
 
     const altText = buildMockupAltText(designName, productType, template.label)
 
-    // Delete existing record for this template, then create fresh
+    // Store the original variant sizeKey (saveSizeKey) when provided, not the resolved PSD key.
+    // This lets the UI match m.sizeKey === vSizeKey correctly.
+    const dbSizeKey = saveSizeKey !== undefined ? saveSizeKey : (template.sizeKey ?? null)
+
+    // Delete existing record for this template+sizeKey combo, then create fresh.
+    // We match on sizeKey too so that multiple variant sizes sharing the same PSD template
+    // (via IB_SIZE_KEY_ALIASES) each get their own DB row.
     await prisma.designMockup.deleteMany({
-      where: { designId, templateId: template.id },
+      where: { designId, templateId: template.id, sizeKey: dbSizeKey },
     })
     await prisma.designMockup.create({
       data: {
@@ -157,7 +168,7 @@ async function generateAndSaveSingleMockup(
         templateId: template.id,
         outputName: template.outputName,
         productType,
-        sizeKey: template.sizeKey ?? null,
+        sizeKey: dbSizeKey,
         driveFileId: uploaded.fileId,
         driveUrl: uploaded.webContentLink,
         altText,
@@ -168,7 +179,7 @@ async function generateAndSaveSingleMockup(
       templateId: template.id,
       outputName: template.outputName,
       label: template.label,
-      sizeKey: template.sizeKey,
+      sizeKey: dbSizeKey ?? undefined,
       driveFileId: uploaded.fileId,
       driveUrl: uploaded.webContentLink,
     }
@@ -178,7 +189,7 @@ async function generateAndSaveSingleMockup(
       templateId: template.id,
       outputName: template.outputName,
       label: template.label,
-      sizeKey: template.sizeKey,
+      sizeKey: saveSizeKey ?? template.sizeKey,
       driveFileId: '',
       driveUrl: '',
       skipped: true,
@@ -210,18 +221,37 @@ export async function generateAllMockupsForDesign(designId: string): Promise<Moc
   // Generic templates (no sizeKey)
   const genericTemplates = getTemplatesForProduct(productType, undefined)
 
-  // Size-specific templates filtered to actual variant sizes
+  // Size-specific templates filtered to actual variant sizes.
+  // For IB products, resolve each variant sizeKey through the alias map to find the
+  // matching PSD sizeKey. Other product types have exact sizeKey matches in the config.
   const variantSizeKeys = new Set(
     design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
   )
-  const allSizeSpecific = getSizeSpecificTemplates(productType)
-  const sizeSpecificTemplates = allSizeSpecific.filter(
-    (t) => t.sizeKey && variantSizeKeys.has(t.sizeKey)
-  )
 
-  const templates = [...genericTemplates, ...sizeSpecificTemplates]
+  // Build a map: resolvedPsdKey → Set of original variant sizeKeys that map to it.
+  // This lets us pick the right PSD template and still store the original sizeKey in DB.
+  const resolvedToOriginals = new Map<string, Set<string>>()
+  for (const vKey of variantSizeKeys) {
+    const resolvedKey = productType === 'IB'
+      ? (IB_SIZE_KEY_ALIASES[vKey] ?? vKey)
+      : vKey
+    if (!resolvedToOriginals.has(resolvedKey)) resolvedToOriginals.set(resolvedKey, new Set())
+    resolvedToOriginals.get(resolvedKey)!.add(vKey)
+  }
 
-  if (templates.length === 0) {
+  // For each matching size-specific template, create one job per original variant sizeKey.
+  type TemplateWithSaveKey = { template: MockupTemplate; saveSizeKey: string }
+  const sizeSpecificJobs: TemplateWithSaveKey[] = []
+  for (const template of getSizeSpecificTemplates(productType)) {
+    if (!template.sizeKey) continue
+    const originals = resolvedToOriginals.get(template.sizeKey)
+    if (!originals) continue
+    for (const origKey of originals) {
+      sizeSpecificJobs.push({ template, saveSizeKey: origKey })
+    }
+  }
+
+  if (genericTemplates.length === 0 && sizeSpecificJobs.length === 0) {
     return [{
       templateId: 'none',
       outputName: 'none',
@@ -235,9 +265,18 @@ export async function generateAllMockupsForDesign(designId: string): Promise<Moc
 
   const results: MockupResult[] = []
 
-  for (const template of templates) {
+  // Run generic templates (no saveSizeKey needed)
+  for (const template of genericTemplates) {
     const result = await generateAndSaveSingleMockup(
       designId, design.designCode, design.designName, productType, designBuffer, template
+    )
+    results.push(result)
+  }
+
+  // Run size-specific jobs, each tagged with the original variant sizeKey
+  for (const { template, saveSizeKey } of sizeSpecificJobs) {
+    const result = await generateAndSaveSingleMockup(
+      designId, design.designCode, design.designName, productType, designBuffer, template, saveSizeKey
     )
     results.push(result)
   }

@@ -488,7 +488,7 @@ export default function DesignDetail() {
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
             {design.driveFileId && (
               <img
-                src={`https://drive.google.com/thumbnail?id=${design.driveFileId}&sz=w200`}
+                src={`https://drive.usercontent.google.com/download?id=${design.driveFileId}&export=view`}
                 alt={design.designName}
                 style={{
                   width: 100,
@@ -823,7 +823,7 @@ export default function DesignDetail() {
                               <>
                                 <a href={viewUrl} target="_blank" rel="noopener noreferrer">
                                   <img
-                                    src={fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w400` : r.driveUrl}
+                                    src={fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=view` : r.driveUrl}
                                     alt={(r as DesignMockup).altText || displayName}
                                     style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 140 }}
                                     onError={(e) => {
@@ -892,12 +892,12 @@ export default function DesignDetail() {
                                   return (
                                     <div key={m.templateId} style={{ width: 150 }}>
                                       <p style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{displayName}</p>
-                                      <a href={viewUrl} target="_blank" rel="noopener noreferrer">
-                                        <img
-                                          src={`https://drive.google.com/thumbnail?id=${fileId}&sz=w300`}
-                                          alt={(m as DesignMockup).altText || displayName}
-                                          style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
-                                        />
+                                       <a href={viewUrl} target="_blank" rel="noopener noreferrer">
+                                         <img
+                                           src={fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=view` : ''}
+                                           alt={(m as DesignMockup).altText || displayName}
+                                           style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
+                                         />
                                       </a>
                                       {(m as DesignMockup).altText && (
                                         <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>

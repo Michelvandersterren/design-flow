@@ -82,6 +82,34 @@ export const MC_TEMPLATES: MockupTemplate[] = [
   { id: 'MC-mockup10',   psdPath: `${BASE}/Mockups MC/Mockup-10_80cm.psd`,                 outputName: 'sfeer-slaapkamer-80',  label: 'sfeer slaapkamer 80 cm', sizeKey: '800' },
 ]
 
+// ---------------------------------------------------------------------------
+// IB — sizeKey alias map
+// Maps every real variant sizeKey to the nearest available PSD sizeKey.
+// Variant sizeKeys are derived from: v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
+// ---------------------------------------------------------------------------
+export const IB_SIZE_KEY_ALIASES: Record<string, string> = {
+  '500x350': '500x350',  // exact — mockup-1 50x35.psd
+  '520x350': '520x350',  // exact — mockup-1 52x35.psd
+  '590x520': '590x500',  // → mockup-1 59x50.psd
+  '600x520': '590x500',
+  '620x520': '590x500',
+  '650x520': '700x520',  // → mockup-1 70x52.psd
+  '700x520': '700x520',  // exact
+  '710x520': '700x520',
+  '760x515': '750x520',  // → mockup-1 75x52.psd
+  '770x510': '750x520',
+  '770x520': '750x520',
+  '780x520': '750x520',
+  '800x520': '800x520',  // exact
+  '810x520': '800x520',
+  '812x527': '800x520',
+  '830x515': '800x520',
+  '860x520': '860x520',  // exact
+  '900x500': '900x520',  // → mockup-1 90x52.psd
+  '900x520': '900x520',  // exact
+  '916x527': '900x520',
+}
+
 /**
  * Returns templates for a product type, optionally including size-specific ones.
  * Without sizeKey: returns only generic (non-size-specific) templates.
