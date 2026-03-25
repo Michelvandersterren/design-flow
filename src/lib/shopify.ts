@@ -18,6 +18,7 @@ async function shopifyFetch(path: string, options: RequestInit = {}) {
   const url = shopifyApiUrl(path)
   const response = await fetch(url, {
     ...options,
+    signal: AbortSignal.timeout(8000),
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
       'Content-Type': 'application/json',

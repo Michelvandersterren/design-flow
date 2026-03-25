@@ -87,7 +87,7 @@ export default function DesignDetail() {
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState<{ shopifyProductId?: string; handle?: string; error?: string } | null>(null)
   const [forking, setForking] = useState(false)
-  const [shopifyPreview, setShopifyPreview] = useState<{ shopifyConfigured: boolean; payload?: unknown } | null>(null)
+  const shopifyConfigured = process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'
   const [generatingMockups, setGeneratingMockups] = useState(false)
   const [deletingMockups, setDeletingMockups] = useState(false)
   const [regeneratingMockup, setRegeneratingMockup] = useState<string | null>(null) // templateId being regenerated
@@ -125,20 +125,9 @@ export default function DesignDetail() {
     }
   }, [params.id])
 
-  const fetchShopifyPreview = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/designs/${params.id}/publish`)
-      const data = await res.json()
-      setShopifyPreview(data)
-    } catch (error) {
-      console.error('Error fetching Shopify preview:', error)
-    }
-  }, [params.id])
-
   useEffect(() => {
     fetchDesign()
-    fetchShopifyPreview()
-  }, [fetchDesign, fetchShopifyPreview])
+  }, [fetchDesign])
 
   const fetchMockupStatus = useCallback(async () => {
     try {
@@ -255,7 +244,6 @@ export default function DesignDetail() {
       if (data.success) {
         setPublishResult({ shopifyProductId: data.shopifyProductId, handle: data.shopifyProductHandle })
         fetchDesign()
-        fetchShopifyPreview()
       } else {
         setPublishResult({ error: data.error || 'Publish mislukt' })
       }
@@ -464,7 +452,7 @@ export default function DesignDetail() {
   const shopifyVariantId = design.variants.find((v) => v.shopifyProductId)?.shopifyProductId
   const alreadyOnShopify = !!shopifyVariantId
   const canPublish = !!(
-    shopifyPreview?.shopifyConfigured &&
+    shopifyConfigured &&
     nlContent &&
     design.variants.length > 0 &&
     !alreadyOnShopify &&
@@ -699,7 +687,7 @@ export default function DesignDetail() {
                 <p style={{ fontSize: 13, color: '#16a34a', marginBottom: 6 }}>
                   Op Shopify — ID: {shopifyVariantId}
                 </p>
-              ) : !shopifyPreview?.shopifyConfigured ? (
+              ) : !shopifyConfigured ? (
                 <p style={{ fontSize: 12, color: '#9ca3af' }}>
                   Shopify niet geconfigureerd
                 </p>
