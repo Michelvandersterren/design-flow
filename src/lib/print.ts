@@ -320,38 +320,40 @@ function addCutContourSpotColor(
   const y1 = pageH_pt - inset_pt
   const r  = radius_pt
 
-  // Bézier approximatie voor kwart-cirkel: k = 0.5523
-  const k = 0.5522847498
+  // Bézier kwartcirkel approximatie: k = 0.5523
+  // Voor hoek van (x, y+r) naar (x+r, y):
+  //   CP1 = (x, y + r - r*k)  = (x, y + r*(1-k))
+  //   CP2 = (x + r - r*k, y)  = (x + r*(1-k), y)
+  // Conform Probo reference PDF (k ≈ 0.5501, wij gebruiken standaard 0.5523)
+  const k  = 0.5522847498
+  const rk = r * (1 - k)   // = r - r*k
 
   // PDF content stream voor rounded rect + spot color stroke
-  // cs = set colorspace (stroke), SC = set spot color value (tint 1.0 = 100%)
-  // J = line cap (1 = round), w = line width, S = stroke
-  // 2 = overprint mode ON via /ExtGState
+  // CS = set stroke colorspace, SC = set spot color tint
+  // w = line width, J = line cap (1=round), j = line join (1=round)
+  // S = stroke path, q/Q = save/restore graphics state
   const pathOps = [
-    // GraphicsState: overprint stroke ON
     'q',
     '/CutcontourGS gs',
-    // Colorspace instellen op spot color
     '/CutcontourCS CS',
-    // Spot color tint = 1.0 (100% = 0C 100M 0Y 0K)
     '1 SC',
-    // Lijnbreedte
     `${STROKE_PT} w`,
-    // Round line cap & join
     '1 J',
     '1 j',
-    // Rounded rect path (met bézier curves)
-    `${x0 + r} ${y0} m`,                              // bottom-left begin
-    `${x1 - r} ${y0} l`,                              // bottom rechts
-    `${x1 - r} ${y0} ${x1} ${y0} ${x1} ${y0 + r} c`, // bottom-right hoek
-    `${x1} ${y1 - r} l`,                              // rechts boven
-    `${x1} ${y1 - r} ${x1} ${y1} ${x1 - r} ${y1} c`, // top-right hoek
-    `${x0 + r} ${y1} l`,                              // boven links
-    `${x0 + r} ${y1} ${x0} ${y1} ${x0} ${y1 - r} c`, // top-left hoek
-    `${x0} ${y0 + r} l`,                              // links onder
-    `${x0} ${y0 + r} ${x0} ${y0} ${x0 + r} ${y0} c`, // bottom-left hoek
-    'h',                                               // close path
-    'S',                                               // stroke (geen fill)
+    // Pad conform Probo: start links-onder (na hoek), loopt tegen de klok in
+    // bottom-left -> omhoog -> top-left hoek -> rechts -> top-right hoek
+    //             -> omlaag -> bottom-right hoek -> links -> bottom-left hoek
+    `${x0} ${y0 + r} m`,                                      // start links, net boven hoek
+    `${x0} ${y1 - r} l`,                                      // links omhoog
+    `${x0} ${y1 - rk}  ${x0 + rk} ${y1}  ${x0 + r} ${y1} c`, // top-left hoek
+    `${x1 - r} ${y1} l`,                                      // boven naar rechts
+    `${x1 - rk} ${y1}  ${x1} ${y1 - rk}  ${x1} ${y1 - r} c`, // top-right hoek
+    `${x1} ${y0 + r} l`,                                      // rechts omlaag
+    `${x1} ${y0 + rk}  ${x1 - rk} ${y0}  ${x1 - r} ${y0} c`, // bottom-right hoek
+    `${x0 + r} ${y0} l`,                                      // onder naar links
+    `${x0 + rk} ${y0}  ${x0} ${y0 + rk}  ${x0} ${y0 + r} c`, // bottom-left hoek
+    'h',
+    'S',
     'Q',
   ].join('\n')
 
