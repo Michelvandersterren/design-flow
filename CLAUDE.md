@@ -84,7 +84,9 @@ design-flow/
 
 ### Content
 - `language`: nl | de | en | fr
-- `description`, `altText`, `seoTitle`, `seoDescription`
+- `description`: korte beschrijving (1-2 zinnen) — Shopify `body_html`, verschijnt boven de koop-knop
+- `longDescription`: lange beschrijving (2-3 paragrafen) — Shopify metafield `custom.long_description`
+- `altText`, `seoTitle`, `seoDescription`
 - `translationStatus`
 
 ### DesignMockup
@@ -112,6 +114,8 @@ design-flow/
 - SKU structure: `{PREFIX}-{CODE}-{WIDTH}-{HEIGHT}` (IB/SP) or `{PREFIX}-{CODE}-{DIAMETER}` (MC)
 - Publishes as DRAFT; bulk publish only for APPROVED designs
 - Images: mockup `driveUrl` passed as `images[{ src }]` — Drive URL public access not yet verified
+- `body_html` = korte description (`description` veld)
+- Long description via metafield `custom.long_description` (multi_line_text_field)
 
 ### Claude Sonnet (AI Content)
 - Content generation uses actual image (Claude vision) + brand voice document + product type
@@ -189,7 +193,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 - ✅ Full Notion sync (291 designs)
 - ✅ AI content generation with Claude vision
-- ✅ Multi-language: NL/DE/EN translation
+- ✅ Multi-language: NL/DE/EN translation (description + longDescription)
 - ✅ Variant generation with EAN-13
 - ✅ Shopify publish (single + bulk for APPROVED)
 - ✅ Mockup pipeline via Photoshop JSX (44 templates, all working)
@@ -200,6 +204,9 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ Alt-text auto-generation per mockup (`buildMockupAltText()`)
 - ✅ Content inline editing — NL/DE/EN cards editable in place
 - ✅ Image resize via sharp (fixes Claude 5MB base64 limit)
+- ✅ Design detail page redesign: tabs, sticky header, workflow progress, lightbox
+- ✅ Print PDFs via pdf-lib with CutContour spot color + 10mm bleed
+- ✅ Split content: `description` (kort, Shopify body_html) + `longDescription` (lang, metafield)
 
 ## Known Issues / Backlog
 
@@ -295,3 +302,73 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 ### Open issue: afbeeldingen laden niet
 - `drive.usercontent.google.com/download?id=...&export=view` werkt niet in browser (auth of CORS)
 - Te onderzoeken: zijn Drive bestanden public, en welke URL-vorm werkt zonder login
+
+---
+
+## Session — 2026-03-25 (vervolg): UI redesign + print PDFs + content split
+
+### Changes committed (3968165)
+
+**`src/app/designs/[id]/page.tsx`**
+- Volledig herontwerp van de design detailpagina
+- Tabs: Overzicht / Mockups / Printbestanden / Content / Varianten
+- Sticky header met thumbnail, naam en statusbadge
+- Workflow-voortgangsbalk met 6 visuele checkmarks
+- Grotere mockup-thumbnails (240×180px) met lightbox/modal (Escape-toets)
+- Progressiebalk bij printbestanden genereren
+- Aanmaakdatum per printbestand
+- ActionRow-componenten met statusindicators en disabled-hints
+
+**`src/app/designs/[id]/error.tsx`** (nieuw)
+- Next.js error boundary aangemaakt (ontbrak → crash bij refresh)
+
+### Changes committed (ce31309)
+
+**`src/app/designs/[id]/page.tsx`** + sub-componenten
+- `React` import toegevoegd (ontbrak → `React.ReactNode` crash)
+
+### Changes committed (a08d58d / 69c7562 / 2eb6c57)
+
+**`src/lib/print.ts`** — PDF generatie volledig herschreven van Illustrator → pdf-lib (Node.js)
+**`src/lib/print-config.ts`** — 19 IB print templates (afmetingen in mm + sizeKey)
+- CutContour spot color correct geïmplementeerd
+- 10mm bleed
+- Bug fix: CutContour stream gepusht in bestaande PDFArray
+
+### Changes committed (4e9b775): Split AI content in description + longDescription
+
+**`prisma/schema.prisma`**
+- `longDescription String?` toegevoegd aan `Content` model (`prisma db push`)
+
+**`src/lib/ai.ts`**
+- `GeneratedContent` interface: nieuw veld `longDescription`
+- Prompt genereert expliciet twee aparte velden:
+  - `description`: 1-2 zinnen, wervend, voor boven de koop-knop
+  - `longDescription`: 2-3 paragrafen, uitgebreider, voor verderop op de pagina
+
+**`src/lib/translation.ts`**
+- `TranslationFields` type: bevat `longDescription`
+- DeepL-pad: `longDescription` als 2e tekst in array (index 1, rest schuift op)
+- Claude-pad: veld opgenomen in JSON-prompt; regex-fallback ook bijgewerkt
+- `max_tokens` verhoogd naar 3000
+
+**`src/lib/shopify.ts`**
+- `body_html` = `toBodyHtml(nlContent.description)` (kort)
+- `longDescription` → metafield `custom.long_description` (type `multi_line_text_field`, alleen als aanwezig)
+
+**`src/app/api/ai/generate/route.ts`**
+- `longDescription` opgeslagen bij zowel create als update
+
+**`src/app/api/designs/[id]/content/route.ts`**
+- `longDescription` opgenomen in PATCH-body verwerking
+
+**`src/app/designs/[id]/page.tsx`**
+- `Content` interface: `longDescription: string | null`
+- `ContentEditFields`: nieuw veld `longDescription`
+- Edit-formulier: textarea voor "Korte beschrijving" (3 rijen) + "Lange beschrijving" (6 rijen)
+- Read-only view: twee aparte `<details>` collapsibles
+
+### Changes committed (this session): CLAUDE.md + .gitignore
+
+**`CLAUDE.md`** — bijgewerkt met alle sessies van vandaag
+**`.gitignore`** — `*.tsbuildinfo` toegevoegd (auto-gegenereerd bestand)
