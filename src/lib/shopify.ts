@@ -166,6 +166,26 @@ export async function buildShopifyProduct(designId: string) {
               },
             ]
           : []),
+        ...(nlContent.seoTitle
+          ? [
+              {
+                namespace: 'global',
+                key: 'title_tag',
+                value: nlContent.seoTitle,
+                type: 'single_line_text_field',
+              },
+            ]
+          : []),
+        ...(nlContent.seoDescription
+          ? [
+              {
+                namespace: 'global',
+                key: 'description_tag',
+                value: nlContent.seoDescription,
+                type: 'single_line_text_field',
+              },
+            ]
+          : []),
       ],
     },
   }
