@@ -8,127 +8,110 @@ datasource db {
 }
 
 model Design {
-  id                String    @id @default(cuid())
-  notionId          String?   @unique
-  designCode        String    @unique
+  id                String         @id @default(cuid())
+  notionId          String?        @unique
+  designCode        String         @unique
   designName        String
   designType        String?
   styleFamily       String?
   collections       String?
   colorTags         String?
-  inductionFriendly Boolean   @default(false)
-  circleFriendly    Boolean   @default(false)
-  splashFriendly    Boolean   @default(false)
-  
+  inductionFriendly Boolean        @default(false)
+  circleFriendly    Boolean        @default(false)
+  splashFriendly    Boolean        @default(false)
   notionData        String?
+  status            String         @default("DRAFT")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   driveFileId       String?
   driveFileName     String?
-  
-  status            String    @default("DRAFT")
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
-  variants          Variant[]
   content           Content[]
-  workflowSteps     WorkflowStep[]
   mockups           DesignMockup[]
-  
+  variants          Variant[]
+  workflowSteps     WorkflowStep[]
+
   @@index([designCode])
   @@index([status])
 }
 
 model Variant {
-  id              String   @id @default(cuid())
-  designId        String
-  design          Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
-  
-  productType     String
-  size            String
-  material        String?  // SP only: 'G' | 'BH0' | 'BH4'
-  sku             String   @unique
-  ean             String?
-  
+  id               String   @id @default(cuid())
+  designId         String
+  productType      String
+  size             String
+  sku              String   @unique
+  ean              String?
   shopifyProductId String?
   shopifyVariantId String?
-  
-  price           Float?
-  weight          Float?
-  
-  printFilePath   String?
-  mockupFilePath  String?
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
+  price            Float?
+  weight           Float?
+  printFilePath    String?
+  mockupFilePath   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  material         String?
+  design           Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+
   @@index([designId])
   @@index([sku])
   @@index([ean])
 }
 
 model Content {
-  id          String   @id @default(cuid())
-  designId    String
-  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
-  
-  language    String
-  description String?
-  altText     String?
-  seoTitle    String?
-  seoDescription String?
-  
-  translatedFrom String?
-  translationStatus String @default("PENDING")
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  id                String   @id @default(cuid())
+  designId          String
+  language          String
+  description       String?
+  altText           String?
+  seoTitle          String?
+  seoDescription    String?
+  translatedFrom    String?
+  translationStatus String   @default("PENDING")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  design            Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+
   @@unique([designId, language])
   @@index([designId])
 }
 
 model WorkflowStep {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   designId    String
-  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
-  
   step        String
-  status      String   @default("PENDING")
-  
+  status      String    @default("PENDING")
   data        String?
   error       String?
-  
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
-  
+  design      Design    @relation(fields: [designId], references: [id], onDelete: Cascade)
+
   @@unique([designId, step])
   @@index([designId])
 }
 
-// Stores every generated mockup Drive URL per design
 model DesignMockup {
   id          String   @id @default(cuid())
   designId    String
-  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
-
-  templateId  String   // e.g. "IB-mockup3"
-  outputName  String   // e.g. "sfeer-keuken" — Drive filename slug
-  productType String   // IB | SP | MC
-  sizeKey     String?  // e.g. "500x350" for size-specific templates
+  templateId  String
+  outputName  String
+  productType String
   driveFileId String
   driveUrl    String
-  altText     String?  // SEO alt-tekst specifiek voor deze mockup afbeelding
-
   createdAt   DateTime @default(now())
+  altText     String?
+  sizeKey     String?
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
   @@index([designId])
 }
 
 model ApiKey {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  key       String   @unique
+  id        String    @id @default(cuid())
+  name      String    @unique
+  key       String    @unique
   service   String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   expiresAt DateTime?
 }
 
@@ -144,37 +127,24 @@ model SyncLog {
 }
 
 model BrandVoice {
-  id          String   @id @default(cuid())
-  key         String   @unique  // e.g. "main"
-  
-  // Bedrijfsinformatie
-  companyInfo       String?
-  mission           String?
-  targetAudience    String?
-  
-  // Productiepartner & materialen
-  partnerInfo       String?
-  materialIB        String?
-  materialMC        String?
-  materialSP        String?
-  
-  // Tone of voice
-  toneOfVoice       String?
-  doUse             String?   // comma-separated words/phrases to use
-  doNotUse          String?   // comma-separated words/phrases to avoid
-  
-  // SEO keywords per product type
-  seoKeywordsIB     String?
-  seoKeywordsMC     String?
-  seoKeywordsSP     String?
-  
-  // Voorbeeldteksten
-  exampleDescriptionIB  String?
-  exampleDescriptionMC  String?
-  exampleDescriptionSP  String?
-  
-  // FAQ
-  faq               String?   // JSON array of {q, a}
-  
-  updatedAt DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  key                  String   @unique
+  companyInfo          String?
+  mission              String?
+  targetAudience       String?
+  partnerInfo          String?
+  materialIB           String?
+  materialMC           String?
+  materialSP           String?
+  toneOfVoice          String?
+  doUse                String?
+  doNotUse             String?
+  seoKeywordsIB        String?
+  seoKeywordsMC        String?
+  seoKeywordsSP        String?
+  exampleDescriptionIB String?
+  exampleDescriptionMC String?
+  exampleDescriptionSP String?
+  faq                  String?
+  updatedAt            DateTime @updatedAt
 }
