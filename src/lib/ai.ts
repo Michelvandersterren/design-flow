@@ -9,7 +9,6 @@ const anthropic = new Anthropic({
 export interface GeneratedContent {
   description: string
   longDescription: string
-  altText: string
   seoTitle: string
   seoDescription: string
   googleShoppingDescription: string
@@ -132,12 +131,11 @@ ${driveFileId ? 'Beschrijf het design visueel accuraat op basis van de afbeeldin
 
 1. Korte beschrijving (description): 1-2 zinnen, wervend en sfeergevend — verschijnt bovenaan de productpagina bij de koop-knop.
 2. Lange beschrijving (longDescription): 2-3 paragrafen, meer uitgebreid — verschijnt verder op de pagina. Verwerk materiaal, gebruik, design inspiratie en gevoel. Verwerk het product type natuurlijk.
-3. Alt-tekst: SEO-vriendelijk en beschrijvend voor de productafbeelding (max 125 tekens).
-4. SEO titel: max 60 tekens, bevat design naam + product type + KitchenArt.
-5. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
-6. Google Shopping beschrijving (googleShoppingDescription): max 150 tekens, feitelijk en feature-gedreven (geen emotionele taal), noem materiaal, afmetingen en gebruik — geschikt voor Google Shopping feed.
+3. SEO titel: max 60 tekens, bevat design naam + product type + KitchenArt.
+4. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
+5. Google Shopping beschrijving (googleShoppingDescription): minimaal 70 en maximaal 150 tekens, feitelijk en feature-gedreven (geen emotionele taal), noem materiaal, afmetingen en gebruik — geschikt voor Google Shopping feed.
 
-Geef het resultaat als JSON met keys: description, longDescription, altText, seoTitle, seoDescription, googleShoppingDescription`
+Geef het resultaat als JSON met keys: description, longDescription, seoTitle, seoDescription, googleShoppingDescription`
 
   try {
     // Try to load image from Drive if fileId is provided
@@ -186,7 +184,6 @@ Geef het resultaat als JSON met keys: description, longDescription, altText, seo
       return {
         description: parsed.description || '',
         longDescription: parsed.longDescription || '',
-        altText: parsed.altText || '',
         seoTitle: parsed.seoTitle || '',
         seoDescription: parsed.seoDescription || '',
         googleShoppingDescription: parsed.googleShoppingDescription || '',
@@ -196,10 +193,9 @@ Geef het resultaat als JSON met keys: description, longDescription, altText, seo
     return {
       description: text,
       longDescription: '',
-      altText: `${designName} - ${productName} | KitchenArt`,
       seoTitle: `${designName} | Premium ${productName} | KitchenArt`,
       seoDescription: `Bestel nu de ${designName} ${productName} bij KitchenArt. Stijlvol design voor een unieke keuken.`,
-      googleShoppingDescription: `${designName} ${productName} | KitchenArt`,
+      googleShoppingDescription: `${designName} ${productName} | KitchenArt | Premium kwaliteit voor de keuken`,
     }
   } catch (error) {
     console.error('Anthropic API error:', error)

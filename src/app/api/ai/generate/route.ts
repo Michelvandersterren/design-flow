@@ -48,7 +48,6 @@ export async function POST(request: NextRequest) {
         data: {
           description: content.description,
           longDescription: content.longDescription,
-          altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
           googleShoppingDescription: content.googleShoppingDescription,
@@ -62,7 +61,6 @@ export async function POST(request: NextRequest) {
           language: 'nl',
           description: content.description,
           longDescription: content.longDescription,
-          altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
           googleShoppingDescription: content.googleShoppingDescription,

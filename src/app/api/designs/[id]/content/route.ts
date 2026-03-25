@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
  * PATCH /api/designs/[id]/content
  * Handmatig aanpassen van content-velden voor een specifieke taal.
  *
- * Body: { language: 'nl' | 'de' | 'en', description?, longDescription?, altText?, seoTitle?, seoDescription? }
+ * Body: { language: 'nl' | 'de' | 'en', description?, longDescription?, seoTitle?, seoDescription?, googleShoppingDescription? }
  */
 export async function PATCH(
   request: NextRequest,
@@ -14,7 +14,7 @@ export async function PATCH(
   try {
     const { id: designId } = await params
     const body = await request.json()
-    const { language, description, longDescription, altText, seoTitle, seoDescription, googleShoppingDescription } = body
+    const { language, description, longDescription, seoTitle, seoDescription, googleShoppingDescription } = body
 
     if (!language || !['nl', 'de', 'en'].includes(language)) {
       return NextResponse.json({ error: 'Ongeldige taal — gebruik nl, de of en' }, { status: 400 })
@@ -24,7 +24,6 @@ export async function PATCH(
     const data: Record<string, string> = {}
     if (description !== undefined) data.description = description
     if (longDescription !== undefined) data.longDescription = longDescription
-    if (altText !== undefined) data.altText = altText
     if (seoTitle !== undefined) data.seoTitle = seoTitle
     if (seoDescription !== undefined) data.seoDescription = seoDescription
     if (googleShoppingDescription !== undefined) data.googleShoppingDescription = googleShoppingDescription

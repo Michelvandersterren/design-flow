@@ -2,6 +2,13 @@ import { prisma } from './prisma'
 import { SP_SIZES, SP_MATERIALS } from './constants'
 import { getDriveDirectUrl } from './drive'
 
+// Static material labels per product type (matches BrandVoice materialIB/MC/SP)
+const PRODUCT_MATERIAL: Record<string, string> = {
+  IB: 'Vinyl texture overlay',
+  MC: 'Aluminium-Dibond matte',
+  SP: 'Aluminium-Dibond matte',
+}
+
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
@@ -101,6 +108,28 @@ export async function buildShopifyProduct(designId: string) {
       option1 = `${Math.round(Number(v.size) / 10)} cm`
     }
 
+    // Build variant metafields
+    const variantMetafields: { namespace: string; key: string; value: string; type: string }[] = []
+
+    if (v.productType === 'MC') {
+      // MC: diameter in mm
+      variantMetafields.push({ namespace: 'custom', key: 'diameter_mm', value: String(Math.round(Number(v.size))), type: 'number_integer' })
+    } else {
+      // IB / SP: width + height in mm
+      const [wStr, hStr] = v.size.split('x')
+      variantMetafields.push({ namespace: 'custom', key: 'width_mm',  value: String(Math.round(Number(wStr))), type: 'number_integer' })
+      variantMetafields.push({ namespace: 'custom', key: 'height_mm', value: String(Math.round(Number(hStr))), type: 'number_integer' })
+    }
+
+    if (v.ean) {
+      variantMetafields.push({ namespace: 'custom', key: 'ean', value: v.ean, type: 'single_line_text_field' })
+    }
+
+    // SP variant: push per-variant material label
+    if (v.productType === 'SP' && v.material) {
+      variantMetafields.push({ namespace: 'custom', key: 'material', value: spMaterialLabel(v.material), type: 'single_line_text_field' })
+    }
+
     return {
       option1,
       ...(option2 !== undefined ? { option2 } : {}),
@@ -113,6 +142,7 @@ export async function buildShopifyProduct(designId: string) {
       requires_shipping: true,
       taxable: true,
       barcode: v.ean ?? undefined,
+      ...(variantMetafields.length > 0 ? { metafields: variantMetafields } : {}),
     }
   })
 
@@ -154,6 +184,21 @@ export async function buildShopifyProduct(designId: string) {
           namespace: 'custom',
           key: 'design_code',
           value: design.designCode,
+          type: 'single_line_text_field',
+        },
+        {
+          namespace: 'custom',
+          key: 'product_type',
+          value: firstType ?? '',
+          type: 'single_line_text_field',
+        },
+        ...(firstType && PRODUCT_MATERIAL[firstType]
+          ? [{ namespace: 'custom', key: 'material', value: PRODUCT_MATERIAL[firstType], type: 'single_line_text_field' }]
+          : []),
+        {
+          namespace: 'custom',
+          key: 'induction_compatible',
+          value: String(design.inductionFriendly ?? false),
           type: 'single_line_text_field',
         },
         ...(nlContent.longDescription
@@ -267,18 +312,24 @@ export async function createShopifyProduct(designId: string) {
  *
  * Updates:
  *  - body_html (short description)
- *  - metafields: long_description, global.title_tag, global.description_tag, google_shopping_description
+ *  - metafields: product_type, material, induction_compatible,
+ *                long_description, global.title_tag, global.description_tag, google_shopping_description
  */
 export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
   const design = await prisma.design.findUnique({
     where: { id: designId },
-    include: { content: true },
+    include: {
+      content: true,
+      variants: { orderBy: [{ productType: 'asc' }, { size: 'asc' }], take: 1 },
+    },
   })
 
   if (!design) throw new Error(`Design not found: ${designId}`)
 
   const nlContent = design.content.find((c) => c.language === 'nl')
   if (!nlContent) throw new Error('Dutch content required')
+
+  const firstType = design.variants[0]?.productType
 
   // Convert plain-text description to HTML paragraphs for Shopify
   const toBodyHtml = (text: string | null): string => {
@@ -329,7 +380,16 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
     }
   }
 
-  // 3. Upsert all content metafields
+  // 3. Upsert product-type metafields
+  if (firstType) {
+    await upsertMetafield('custom', 'product_type', firstType, 'single_line_text_field')
+    if (PRODUCT_MATERIAL[firstType]) {
+      await upsertMetafield('custom', 'material', PRODUCT_MATERIAL[firstType], 'single_line_text_field')
+    }
+  }
+  await upsertMetafield('custom', 'induction_compatible', String(design.inductionFriendly ?? false), 'single_line_text_field')
+
+  // 4. Upsert all content metafields
   if (nlContent.longDescription) {
     await upsertMetafield('custom', 'long_description', toBodyHtml(nlContent.longDescription), 'multi_line_text_field')
   }

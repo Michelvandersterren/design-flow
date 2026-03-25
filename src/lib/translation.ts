@@ -15,7 +15,6 @@ const LANGUAGE_NAMES: Record<string, string> = {
 type TranslationFields = {
   description: string | null
   longDescription: string | null
-  altText: string | null
   seoTitle: string | null
   seoDescription: string | null
   googleShoppingDescription: string | null
@@ -73,7 +72,6 @@ ${JSON.stringify(texts, null, 2)}`
     parsed = {
       description: extractField('description'),
       longDescription: extractField('longDescription'),
-      altText: extractField('altText'),
       seoTitle: extractField('seoTitle'),
       seoDescription: extractField('seoDescription'),
       googleShoppingDescription: extractField('googleShoppingDescription'),
@@ -83,7 +81,6 @@ ${JSON.stringify(texts, null, 2)}`
   return {
     description: parsed.description ?? texts.description,
     longDescription: parsed.longDescription ?? texts.longDescription,
-    altText: parsed.altText ?? texts.altText,
     seoTitle: parsed.seoTitle ?? texts.seoTitle,
     seoDescription: parsed.seoDescription ?? texts.seoDescription,
     googleShoppingDescription: parsed.googleShoppingDescription ?? texts.googleShoppingDescription,
@@ -130,7 +127,6 @@ export async function translateContent(
 
   let translatedDescription = content.description
   let translatedLongDescription = content.longDescription
-  let translatedAltText = content.altText
   let translatedSeoTitle = content.seoTitle
   let translatedSeoDescription = content.seoDescription
   let translatedGoogleShoppingDescription = content.googleShoppingDescription
@@ -143,7 +139,6 @@ export async function translateContent(
         [
           content.description,
           content.longDescription,
-          content.altText,
           content.seoTitle,
           content.seoDescription,
           content.googleShoppingDescription,
@@ -152,17 +147,15 @@ export async function translateContent(
       )
       translatedDescription = results[0]
       translatedLongDescription = results[1]
-      translatedAltText = results[2]
-      translatedSeoTitle = results[3]
-      translatedSeoDescription = results[4]
-      translatedGoogleShoppingDescription = results[5]
+      translatedSeoTitle = results[2]
+      translatedSeoDescription = results[3]
+      translatedGoogleShoppingDescription = results[4]
     } catch (error) {
       console.error('DeepL translation failed, falling back to Claude:', error)
       const result = await translateWithClaude(
         {
           description: content.description,
           longDescription: content.longDescription,
-          altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
           googleShoppingDescription: content.googleShoppingDescription,
@@ -171,7 +164,6 @@ export async function translateContent(
       )
       translatedDescription = result.description
       translatedLongDescription = result.longDescription
-      translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
       translatedGoogleShoppingDescription = result.googleShoppingDescription
@@ -183,7 +175,6 @@ export async function translateContent(
         {
           description: content.description,
           longDescription: content.longDescription,
-          altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
           googleShoppingDescription: content.googleShoppingDescription,
@@ -192,7 +183,6 @@ export async function translateContent(
       )
       translatedDescription = result.description
       translatedLongDescription = result.longDescription
-      translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
       translatedGoogleShoppingDescription = result.googleShoppingDescription
@@ -218,7 +208,6 @@ export async function translateContent(
       data: {
         description: translatedDescription,
         longDescription: translatedLongDescription,
-        altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
         googleShoppingDescription: translatedGoogleShoppingDescription,
@@ -233,7 +222,6 @@ export async function translateContent(
         language: targetLanguage,
         description: translatedDescription,
         longDescription: translatedLongDescription,
-        altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
         googleShoppingDescription: translatedGoogleShoppingDescription,
@@ -246,7 +234,6 @@ export async function translateContent(
   return {
     description: translatedDescription,
     longDescription: translatedLongDescription,
-    altText: translatedAltText,
     seoTitle: translatedSeoTitle,
     seoDescription: translatedSeoDescription,
     googleShoppingDescription: translatedGoogleShoppingDescription,

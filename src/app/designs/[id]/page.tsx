@@ -20,7 +20,6 @@ interface Content {
   language: string
   description: string | null
   longDescription: string | null
-  altText: string | null
   seoTitle: string | null
   seoDescription: string | null
   googleShoppingDescription: string | null
@@ -259,7 +258,7 @@ export default function DesignDetail() {
   } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  type ContentEditFields = { description: string; longDescription: string; altText: string; seoTitle: string; seoDescription: string; googleShoppingDescription: string }
+  type ContentEditFields = { description: string; longDescription: string; seoTitle: string; seoDescription: string; googleShoppingDescription: string }
   const [contentEditMode, setContentEditMode] = useState<Record<string, boolean>>({})
   const [contentEditValues, setContentEditValues] = useState<Record<string, ContentEditFields>>({})
   const [contentSaving, setContentSaving] = useState<Record<string, boolean>>({})
@@ -526,7 +525,7 @@ export default function DesignDetail() {
   const openContentEdit = (lang: string, c: Content) => {
     setContentEditValues((prev) => ({
       ...prev,
-      [lang]: { description: c.description ?? '', longDescription: c.longDescription ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '', googleShoppingDescription: c.googleShoppingDescription ?? '' },
+      [lang]: { description: c.description ?? '', longDescription: c.longDescription ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '', googleShoppingDescription: c.googleShoppingDescription ?? '' },
     }))
     setContentEditMode((prev) => ({ ...prev, [lang]: true }))
   }
@@ -1303,7 +1302,6 @@ export default function DesignDetail() {
                     editing && vals ? (
                       <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {[
-                          { field: 'altText' as const, label: 'Alt Text', type: 'input' },
                           { field: 'seoTitle' as const, label: 'SEO Title', type: 'input' },
                           { field: 'seoDescription' as const, label: 'SEO Description', type: 'textarea2' },
                           { field: 'googleShoppingDescription' as const, label: 'Google Shopping', type: 'input' },
@@ -1326,7 +1324,6 @@ export default function DesignDetail() {
                     ) : (
                       <div style={{ fontSize: 13 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          <ContentField label="Alt Text" value={c.altText} />
                           <ContentField label="SEO Title" value={c.seoTitle} />
                           <ContentField label="SEO Description" value={c.seoDescription} />
                           <ContentField label="Google Shopping" value={c.googleShoppingDescription} />
