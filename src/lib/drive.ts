@@ -67,12 +67,21 @@ export async function uploadDesignToDrive(
     fileId: file.id,
     fileName: file.name || fileName,
     webViewLink: file.webViewLink || '',
-    webContentLink: file.webContentLink || `https://drive.google.com/uc?id=${file.id}`,
+    webContentLink: getDriveDirectUrl(file.id),
   }
 }
 
 export function getDriveThumbnailUrl(fileId: string): string {
   return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+}
+
+/**
+ * Returns a direct-access URL for a Drive file that works without redirects.
+ * Shopify (and browsers) can fetch this URL without any cookie/auth challenge.
+ * Uses drive.usercontent.google.com which returns 200 image/jpeg directly.
+ */
+export function getDriveDirectUrl(fileId: string): string {
+  return `https://drive.usercontent.google.com/download?id=${fileId}&export=view`
 }
 
 export async function deleteDesignFromDrive(fileId: string): Promise<void> {

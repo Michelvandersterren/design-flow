@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import { SP_SIZES, SP_MATERIALS } from './constants'
+import { getDriveDirectUrl } from './drive'
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
@@ -128,8 +129,12 @@ export async function buildShopifyProduct(designId: string) {
     ? [{ name: 'Formaat' }, { name: 'Materiaal' }]
     : [{ name: 'Formaten' }]
 
-  // Build images array from saved mockups (Drive direct-download URLs)
-  const images = (design.mockups ?? []).map((m) => ({ src: m.driveUrl }))
+  // Build images array from saved mockups.
+  // Use the direct usercontent URL (no redirects) so Shopify can fetch the image reliably.
+  const images = (design.mockups ?? []).map((m) => ({
+    src: getDriveDirectUrl(m.driveFileId),
+    alt: m.altText ?? undefined,
+  }))
 
   return {
     product: {
