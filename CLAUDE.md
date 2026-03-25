@@ -210,9 +210,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 ## Known Issues / Backlog
 
-- Afbeeldingen worden niet getoond in de UI — `drive.usercontent.google.com/download?id=...&export=view` URLs laden niet in de browser (auth of CORS probleem) — **open**
-- Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access not yet verified in production
-- Stijlfamilies auto-generate: API not yet built (group designs into style families via Claude, write back to Notion)
+- Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access confirmed (mockup uploads use `permissions.create({ role: 'reader', type: 'anyone' })`), but not yet verified end-to-end in production
 - EN translation: works via Claude, but was only recently wired up
 
 ---
@@ -410,3 +408,31 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - Metafield-vertalingen hebben hun eigen GID en digest (apart van product-level velden)
 - NL is de default store-taal → geen translation push voor NL nodig
 - Alle translation errors zijn non-fatal (gelogd, product-publish slaagt altijd)
+
+---
+
+## Session — 2026-03-25 (vervolg): Drive proxy fix + Translations title fix + Stijlfamilies
+
+### Drive image proxy fix
+
+**`src/app/api/drive-image/[fileId]/route.ts`**
+- `params` type gewijzigd naar `Promise<{ fileId: string }>` + `await params` (Next.js 14+ async params patroon — alle andere routes gebruikten dit al)
+- `redirect: 'follow'` toegevoegd aan `fetch()` (Drive redirect naar `usercontent` subdomein)
+- HTML content-type detectie: als Drive een loginpagina teruggeeft (text/html), 502 retourneren i.p.v. kapotte image-bytes
+
+### Translations API title fix
+
+**`src/lib/shopify-translations.ts`**
+- Verwijderd: `title` vertaling (was `content.seoTitle` → Shopify product `title` field)
+- De product-titel is de designnaam — niet taalspecifiek, mag niet worden overschreven
+- Alleen `body_html` en metafields worden nu als vertalingen gepusht
+
+### Stijlfamilies (al volledig gebouwd in eerdere sessie — gedocumenteerd)
+
+**`src/app/api/designs/style-families/route.ts`** — volledig werkend:
+- `GET` → lijst van stijlfamilies uit DB
+- `POST` → Claude groepeert designs in stijlfamilies + Notion write-back via `updateStyleFamilyInNotion()`
+
+**`src/app/page.tsx`** — dashboard heeft "Stijlfamilies genereren" knop + resultaatweergave
+
+**`src/lib/notion.ts`** — `updateStyleFamilyInNotion()` bestaat al

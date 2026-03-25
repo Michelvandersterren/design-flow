@@ -144,19 +144,8 @@ async function pushTranslationsForLocale(
 
   const digestMap = new Map(translatableContent.map((c) => [c.key, c.digest]))
 
-  // Product title
-  const titleDigest = digestMap.get('title')
-  // body_html
+  // body_html (short description)
   const bodyDigest = digestMap.get('body_html')
-
-  if (titleDigest) {
-    translations.push({
-      key: 'title',
-      value: content.seoTitle ?? '',
-      locale,
-      translatableContentDigest: titleDigest,
-    })
-  }
 
   if (bodyDigest && content.description) {
     translations.push({

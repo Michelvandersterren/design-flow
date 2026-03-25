@@ -12,9 +12,9 @@ import { NextRequest, NextResponse } from 'next/server'
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
-  const { fileId } = params
+  const { fileId } = await params
 
   if (!fileId || !/^[\w-]+$/.test(fileId)) {
     return new NextResponse('Invalid fileId', { status: 400 })
@@ -25,6 +25,7 @@ export async function GET(
   let upstream: Response
   try {
     upstream = await fetch(driveUrl, {
+      redirect: 'follow',
       signal: AbortSignal.timeout(15000),
       headers: {
         // Pass a browser-like User-Agent so Google doesn't block the server request
@@ -40,6 +41,12 @@ export async function GET(
   }
 
   const contentType = upstream.headers.get('content-type') || 'image/jpeg'
+
+  // If Drive returns HTML (e.g. virus scan warning page), return 502
+  if (contentType.includes('text/html')) {
+    return new NextResponse('Drive returned HTML instead of image — file may require login or is too large', { status: 502 })
+  }
+
   const body = await upstream.arrayBuffer()
 
   return new NextResponse(body, {
