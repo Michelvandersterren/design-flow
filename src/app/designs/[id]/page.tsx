@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+
 interface DesignMockup {
   id: string
   templateId: string
@@ -84,7 +85,7 @@ interface DesignPrintFile {
   heightMM: number
   fileName: string
   driveFileId: string
-  driveUrl: string   // webViewLink — open in Drive
+  driveUrl: string
   createdAt: string
 }
 
@@ -99,27 +100,144 @@ interface PrintFileResult {
   skipReason?: string
 }
 
+type TabId = 'overview' | 'mockups' | 'printfiles' | 'content' | 'variants'
+
+// ─── Lightbox ────────────────────────────────────────────────────────────────
+function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 2000,
+        background: 'rgba(0,0,0,0.85)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'zoom-out',
+      }}
+    >
+      <img
+        src={src}
+        alt={alt}
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8, objectFit: 'contain', cursor: 'default' }}
+      />
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute', top: 20, right: 24,
+          background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%',
+          width: 40, height: 40, fontSize: 22, color: '#fff', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >×</button>
+    </div>
+  )
+}
+
+// ─── Workflow progress bar ────────────────────────────────────────────────────
+const WORKFLOW_STAGES = [
+  { key: 'design',      label: 'Design' },
+  { key: 'variants',    label: 'Varianten' },
+  { key: 'content',     label: 'Content' },
+  { key: 'mockups',     label: 'Mockups' },
+  { key: 'printfiles',  label: 'Printbestanden' },
+  { key: 'shopify',     label: 'Shopify' },
+]
+
+function WorkflowProgress({ design, savedMockups, savedPrintFiles }: {
+  design: Design
+  savedMockups: DesignMockup[]
+  savedPrintFiles: DesignPrintFile[]
+}) {
+  const stages = [
+    { key: 'design',     done: !!design.driveFileId },
+    { key: 'variants',   done: design.variants.length > 0 },
+    { key: 'content',    done: design.content.some((c) => c.language === 'nl') },
+    { key: 'mockups',    done: savedMockups.length > 0 },
+    { key: 'printfiles', done: savedPrintFiles.length > 0 },
+    { key: 'shopify',    done: design.variants.some((v) => v.shopifyProductId) },
+  ]
+
+  const doneCount = stages.filter((s) => s.done).length
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+        {stages.map((stage, i) => {
+          const label = WORKFLOW_STAGES[i].label
+          const isLast = i === stages.length - 1
+          return (
+            <div key={stage.key} style={{ display: 'flex', alignItems: 'center', flex: isLast ? '0 0 auto' : 1 }}>
+              {/* Step circle */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: stage.done ? '#10b981' : '#e5e7eb',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, fontWeight: 700,
+                  color: stage.done ? '#fff' : '#9ca3af',
+                  flexShrink: 0,
+                  border: stage.done ? 'none' : '2px solid #d1d5db',
+                  transition: 'background 0.2s',
+                }}>
+                  {stage.done ? '✓' : i + 1}
+                </div>
+                <span style={{ fontSize: 10, color: stage.done ? '#065f46' : '#9ca3af', whiteSpace: 'nowrap', fontWeight: stage.done ? 600 : 400 }}>
+                  {label}
+                </span>
+              </div>
+              {/* Connector line */}
+              {!isLast && (
+                <div style={{
+                  flex: 1, height: 3, marginBottom: 16,
+                  background: stage.done ? '#10b981' : '#e5e7eb',
+                  transition: 'background 0.2s',
+                }} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+        {doneCount} van {stages.length} stappen voltooid
+      </p>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function DesignDetail() {
   const params = useParams()
   const router = useRouter()
   const [design, setDesign] = useState<Design | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<TabId>('overview')
+
   const [generating, setGenerating] = useState(false)
   const [translating, setTranslating] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState<{ shopifyProductId?: string; handle?: string; error?: string } | null>(null)
   const [forking, setForking] = useState(false)
   const shopifyConfigured = process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'
+
   const [generatingMockups, setGeneratingMockups] = useState(false)
   const [deletingMockups, setDeletingMockups] = useState(false)
-  const [regeneratingMockup, setRegeneratingMockup] = useState<string | null>(null) // templateId being regenerated
+  const [regeneratingMockup, setRegeneratingMockup] = useState<string | null>(null)
   const [mockupProgress, setMockupProgress] = useState<{ current: number; total: number } | null>(null)
   const [newMockupResults, setNewMockupResults] = useState<MockupGenerateResult[] | null>(null)
   const [mockupStatus, setMockupStatus] = useState<{ readyCount: number; totalCount: number; templates: { id: string; file: string; ready: boolean }[] } | null>(null)
 
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
+
   // Print file state
   const [generatingPrintFiles, setGeneratingPrintFiles] = useState(false)
-  const [regeneratingPrintFile, setRegeneratingPrintFile] = useState<string | null>(null) // sizeKey being regenerated
+  const [printProgress, setPrintProgress] = useState<{ current: number; total: number } | null>(null)
+  const [regeneratingPrintFile, setRegeneratingPrintFile] = useState<string | null>(null)
   const [deletingPrintFiles, setDeletingPrintFiles] = useState(false)
   const [savedPrintFiles, setSavedPrintFiles] = useState<DesignPrintFile[]>([])
   const [newPrintFileResults, setNewPrintFileResults] = useState<PrintFileResult[] | null>(null)
@@ -137,7 +255,6 @@ export default function DesignDetail() {
   } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Content inline editing state
   type ContentEditFields = { description: string; altText: string; seoTitle: string; seoDescription: string }
   const [contentEditMode, setContentEditMode] = useState<Record<string, boolean>>({})
   const [contentEditValues, setContentEditValues] = useState<Record<string, ContentEditFields>>({})
@@ -155,9 +272,7 @@ export default function DesignDetail() {
     }
   }, [params.id])
 
-  useEffect(() => {
-    fetchDesign()
-  }, [fetchDesign])
+  useEffect(() => { fetchDesign() }, [fetchDesign])
 
   const fetchMockupStatus = useCallback(async () => {
     try {
@@ -168,9 +283,7 @@ export default function DesignDetail() {
   }, [params.id])
 
   useEffect(() => {
-    if (design?.variants && design.variants.length > 0) {
-      fetchMockupStatus()
-    }
+    if (design?.variants && design.variants.length > 0) fetchMockupStatus()
   }, [design?.variants?.length, fetchMockupStatus])
 
   const fetchPrintFiles = useCallback(async () => {
@@ -190,17 +303,12 @@ export default function DesignDetail() {
     setGenerating(true)
     try {
       const res = await fetch(`/api/designs/${params.id}/variants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       })
       const data = await res.json()
       if (data.success) fetchDesign()
-    } catch (error) {
-      console.error('Error generating variants:', error)
-    } finally {
-      setGenerating(false)
-    }
+    } catch (error) { console.error('Error generating variants:', error) }
+    finally { setGenerating(false) }
   }
 
   const generateContent = async (productType: string) => {
@@ -208,22 +316,14 @@ export default function DesignDetail() {
     setGenerating(true)
     try {
       const res = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ designId: design.id, productType }),
       })
       const data = await res.json()
-      if (data.success) {
-        fetchDesign()
-      } else {
-        alert('Content generatie mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch (error) {
-      console.error('Error generating content:', error)
-      alert('Content generatie fout')
-    } finally {
-      setGenerating(false)
-    }
+      if (data.success) fetchDesign()
+      else alert('Content generatie mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Content generatie fout') }
+    finally { setGenerating(false) }
   }
 
   const translateContent = async (language: string) => {
@@ -231,17 +331,12 @@ export default function DesignDetail() {
     setTranslating(language)
     try {
       const res = await fetch(`/api/designs/${params.id}/translate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }),
       })
       const data = await res.json()
       if (data.success) fetchDesign()
-    } catch (error) {
-      console.error('Error translating content:', error)
-    } finally {
-      setTranslating(null)
-    }
+    } catch { console.error('Error translating') }
+    finally { setTranslating(null) }
   }
 
   const forkDesign = async (targetType: 'IB' | 'SP' | 'MC') => {
@@ -250,25 +345,15 @@ export default function DesignDetail() {
     setForking(true)
     try {
       const res = await fetch(`/api/designs/${params.id}/fork`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetType }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetType }),
       })
       const data = await res.json()
-      if (data.success) {
-        router.push(`/designs/${data.design.id}`)
-      } else if (data.existingId) {
-        if (confirm(`Er bestaat al een ${targetType}-design. Wil je daarheen navigeren?`)) {
-          router.push(`/designs/${data.existingId}`)
-        }
-      } else {
-        alert('Fork mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fork fout')
-    } finally {
-      setForking(false)
-    }
+      if (data.success) router.push(`/designs/${data.design.id}`)
+      else if (data.existingId) {
+        if (confirm(`Er bestaat al een ${targetType}-design. Wil je daarheen navigeren?`)) router.push(`/designs/${data.existingId}`)
+      } else alert('Fork mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fork fout') }
+    finally { setForking(false) }
   }
 
   const publishToShopify = async () => {
@@ -278,22 +363,15 @@ export default function DesignDetail() {
     setPublishResult(null)
     try {
       const res = await fetch(`/api/designs/${params.id}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       })
       const data = await res.json()
       if (data.success) {
         setPublishResult({ shopifyProductId: data.shopifyProductId, handle: data.shopifyProductHandle })
         fetchDesign()
-      } else {
-        setPublishResult({ error: data.error || 'Publish mislukt' })
-      }
-    } catch {
-      setPublishResult({ error: 'Netwerkfout tijdens publiceren' })
-    } finally {
-      setPublishing(false)
-    }
+      } else setPublishResult({ error: data.error || 'Publish mislukt' })
+    } catch { setPublishResult({ error: 'Netwerkfout tijdens publiceren' }) }
+    finally { setPublishing(false) }
   }
 
   const generateMockups = async () => {
@@ -304,23 +382,16 @@ export default function DesignDetail() {
     setMockupProgress({ current: 0, total })
     try {
       const res = await fetch(`/api/designs/${params.id}/mockup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       })
       const data = await res.json()
       if (data.results) {
         setNewMockupResults(data.results)
         setMockupProgress({ current: data.results.length, total: data.results.length })
         fetchDesign()
-      } else {
-        alert('Mockup generatie mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij mockup generatie')
-    } finally {
-      setGeneratingMockups(false)
-    }
+      } else alert('Mockup generatie mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij mockup generatie') }
+    finally { setGeneratingMockups(false) }
   }
 
   const regenerateMockup = async (templateId: string) => {
@@ -328,21 +399,13 @@ export default function DesignDetail() {
     setRegeneratingMockup(templateId)
     try {
       const res = await fetch(`/api/designs/${params.id}/mockup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId }),
       })
       const data = await res.json()
-      if (data.results) {
-        fetchDesign()
-      } else {
-        alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij hergenerate mockup')
-    } finally {
-      setRegeneratingMockup(null)
-    }
+      if (data.results) fetchDesign()
+      else alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij hergenerate mockup') }
+    finally { setRegeneratingMockup(null) }
   }
 
   const deleteAllMockups = async () => {
@@ -353,42 +416,30 @@ export default function DesignDetail() {
     try {
       const res = await fetch(`/api/designs/${params.id}/mockup`, { method: 'DELETE' })
       const data = await res.json()
-      if (data.success) {
-        fetchDesign()
-      } else {
-        alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij verwijderen mockups')
-    } finally {
-      setDeletingMockups(false)
-    }
+      if (data.success) fetchDesign()
+      else alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij verwijderen mockups') }
+    finally { setDeletingMockups(false) }
   }
-
-  const generateSizeSpecificMockups = async () => { /* legacy — not used */ }
 
   const generatePrintFiles = async () => {
     if (!design) return
     setGeneratingPrintFiles(true)
     setNewPrintFileResults(null)
+    const ibVariants = design.variants.filter((v) => v.productType === 'IB')
+    setPrintProgress({ current: 0, total: ibVariants.length })
     try {
       const res = await fetch(`/api/designs/${params.id}/printfile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       })
       const data = await res.json()
       if (data.results) {
         setNewPrintFileResults(data.results)
+        setPrintProgress({ current: data.results.length, total: data.results.length })
         fetchPrintFiles()
-      } else {
-        alert('Printbestand generatie mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij printbestand generatie')
-    } finally {
-      setGeneratingPrintFiles(false)
-    }
+      } else alert('Printbestand generatie mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij printbestand generatie') }
+    finally { setGeneratingPrintFiles(false) }
   }
 
   const regeneratePrintFile = async (sizeKey: string) => {
@@ -396,21 +447,13 @@ export default function DesignDetail() {
     setRegeneratingPrintFile(sizeKey)
     try {
       const res = await fetch(`/api/designs/${params.id}/printfile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sizeKey }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sizeKey }),
       })
       const data = await res.json()
-      if (data.results) {
-        fetchPrintFiles()
-      } else {
-        alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij hergenerate printbestand')
-    } finally {
-      setRegeneratingPrintFile(null)
-    }
+      if (data.results) fetchPrintFiles()
+      else alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij hergenerate printbestand') }
+    finally { setRegeneratingPrintFile(null) }
   }
 
   const deleteAllPrintFiles = async () => {
@@ -421,16 +464,10 @@ export default function DesignDetail() {
     try {
       const res = await fetch(`/api/designs/${params.id}/printfile`, { method: 'DELETE' })
       const data = await res.json()
-      if (data.success) {
-        setSavedPrintFiles([])
-      } else {
-        alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
-      }
-    } catch {
-      alert('Fout bij verwijderen printbestanden')
-    } finally {
-      setDeletingPrintFiles(false)
-    }
+      if (data.success) setSavedPrintFiles([])
+      else alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
+    } catch { alert('Fout bij verwijderen printbestanden') }
+    finally { setDeletingPrintFiles(false) }
   }
 
   const openEditMode = () => {
@@ -455,42 +492,27 @@ export default function DesignDetail() {
       const collectionsArr = editForm.collections.split(',').map((s) => s.trim()).filter(Boolean)
       const colorTagsArr = editForm.colorTags.split(',').map((s) => s.trim()).filter(Boolean)
       const res = await fetch(`/api/designs/${params.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...editForm,
-          collections: JSON.stringify(collectionsArr),
-          colorTags: JSON.stringify(colorTagsArr),
-        }),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...editForm, collections: JSON.stringify(collectionsArr), colorTags: JSON.stringify(colorTagsArr) }),
       })
       const data = await res.json()
       if (data.design) {
         setDesign((prev) => prev ? { ...prev, ...data.design } : data.design)
         setEditMode(false)
       }
-    } catch (err) {
-      alert('Opslaan mislukt')
-    } finally {
-      setSaving(false)
-    }
+    } catch { alert('Opslaan mislukt') }
+    finally { setSaving(false) }
   }
 
   const openContentEdit = (lang: string, c: Content) => {
     setContentEditValues((prev) => ({
       ...prev,
-      [lang]: {
-        description: c.description ?? '',
-        altText: c.altText ?? '',
-        seoTitle: c.seoTitle ?? '',
-        seoDescription: c.seoDescription ?? '',
-      },
+      [lang]: { description: c.description ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '' },
     }))
     setContentEditMode((prev) => ({ ...prev, [lang]: true }))
   }
 
-  const cancelContentEdit = (lang: string) => {
-    setContentEditMode((prev) => ({ ...prev, [lang]: false }))
-  }
+  const cancelContentEdit = (lang: string) => setContentEditMode((prev) => ({ ...prev, [lang]: false }))
 
   const saveContentEdit = async (lang: string) => {
     const values = contentEditValues[lang]
@@ -498,28 +520,14 @@ export default function DesignDetail() {
     setContentSaving((prev) => ({ ...prev, [lang]: true }))
     try {
       const res = await fetch(`/api/designs/${params.id}/content`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          language: lang,
-          description: values.description,
-          altText: values.altText,
-          seoTitle: values.seoTitle,
-          seoDescription: values.seoDescription,
-        }),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: lang, ...values }),
       })
       const data = await res.json()
-      if (data.success) {
-        setContentEditMode((prev) => ({ ...prev, [lang]: false }))
-        fetchDesign()
-      } else {
-        alert('Opslaan mislukt: ' + (data.error ?? 'onbekende fout'))
-      }
-    } catch {
-      alert('Netwerkfout bij opslaan')
-    } finally {
-      setContentSaving((prev) => ({ ...prev, [lang]: false }))
-    }
+      if (data.success) { setContentEditMode((prev) => ({ ...prev, [lang]: false })); fetchDesign() }
+      else alert('Opslaan mislukt: ' + (data.error ?? 'onbekende fout'))
+    } catch { alert('Netwerkfout bij opslaan') }
+    finally { setContentSaving((prev) => ({ ...prev, [lang]: false })) }
   }
 
   const getStatusBadgeClass = (status: string) => {
@@ -542,7 +550,6 @@ export default function DesignDetail() {
     }
   }
 
-  // Derive product type from design flags
   const getProductType = (d: Design): string => {
     if (d.inductionFriendly) return 'INDUCTION'
     if (d.circleFriendly) return 'CIRCLE'
@@ -559,899 +566,996 @@ export default function DesignDetail() {
 
   const shopifyVariantId = design.variants.find((v) => v.shopifyProductId)?.shopifyProductId
   const alreadyOnShopify = !!shopifyVariantId
-  const canPublish = !!(
-    shopifyConfigured &&
-    nlContent &&
-    design.variants.length > 0 &&
-    !alreadyOnShopify &&
-    design.status !== 'LIVE'
-  )
+  const canPublish = !!(shopifyConfigured && nlContent && design.variants.length > 0 && !alreadyOnShopify && design.status !== 'LIVE')
 
-  // Combine saved DB mockups with any freshly generated ones this session
   const savedMockups = design.mockups ?? []
   const displayMockups: (DesignMockup & { isNew?: boolean } | MockupGenerateResult & { isNew?: boolean })[] =
     newMockupResults
       ? newMockupResults.map((r) => ({ ...r, isNew: true }))
       : savedMockups.map((m) => ({ ...m, isNew: false }))
 
+  const hasIB = design.variants.some((v) => v.productType === 'IB')
+
+  // Tab badge counts
+  const tabBadges: Partial<Record<TabId, number>> = {
+    mockups: savedMockups.length || undefined,
+    printfiles: savedPrintFiles.length || undefined,
+    content: design.content.length || undefined,
+    variants: design.variants.length || undefined,
+  }
+
+  // ─── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="container">
-      <header style={{ marginBottom: 30 }}>
-        <button onClick={() => router.push('/')} className="btn btn-secondary" style={{ marginBottom: 10 }}>
-          ← Terug naar Dashboard
-        </button>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24 }}>
-          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      {lightbox && <Lightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />}
+
+      {/* ── Sticky header ── */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 100,
+        background: '#fff',
+        borderBottom: '1px solid #e5e7eb',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
+        marginBottom: 0,
+        borderRadius: 0,
+      }}>
+        <div className="container" style={{ padding: '12px 20px' }}>
+          {/* Back + title row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <button
+              onClick={() => router.push('/')}
+              className="btn btn-secondary"
+              style={{ fontSize: 12, padding: '5px 12px', flexShrink: 0 }}
+            >
+              ← Terug
+            </button>
+
+            {/* Design thumbnail */}
             {design.driveFileId && (
               <img
                 src={`/api/drive-image/${design.driveFileId}`}
                 alt={design.designName}
+                onClick={() => design.driveFileId && setLightbox({ src: `/api/drive-image/${design.driveFileId}`, alt: design.designName })}
                 style={{
-                  width: 100,
-                  height: 100,
+                  width: 56, height: 56,
                   objectFit: 'contain',
                   borderRadius: 8,
                   border: '1px solid #e5e7eb',
                   background: '#f9fafb',
+                  cursor: 'zoom-in',
+                  flexShrink: 0,
                 }}
               />
             )}
-            <div>
-              <h1 style={{ margin: 0 }}>{design.designName}</h1>
-              <p style={{ color: '#666', margin: '4px 0 0' }}>Code: <strong>{design.designCode}</strong></p>
-              {design.designType && (
-                <p style={{ color: '#666', margin: '2px 0 0', fontSize: 13 }}>Type: {design.designType}</p>
-              )}
-              {design.notionId && (
-                <p style={{ color: '#999', fontSize: 12, margin: '2px 0 0' }}>Notion ID: {design.notionId}</p>
-              )}
+
+            {/* Name + meta */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h1 style={{ fontSize: 18, margin: 0, lineHeight: 1.2 }}>{design.designName}</h1>
+                <span className={`badge ${getStatusBadgeClass(design.status)}`}>{design.status}</span>
+              </div>
+              <p style={{ color: '#6b7280', margin: '2px 0 0', fontSize: 12 }}>
+                <strong>{design.designCode}</strong>
+                {design.designType && <> · {design.designType}</>}
+                {design.styleFamily && <> · {design.styleFamily}</>}
+              </p>
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-secondary" onClick={openEditMode} style={{ fontSize: 13 }}>
+
+            {/* Edit button */}
+            <button className="btn btn-secondary" onClick={openEditMode} style={{ fontSize: 12, padding: '5px 12px', flexShrink: 0 }}>
               Bewerken
             </button>
-            <span className={`badge ${getStatusBadgeClass(design.status)}`} style={{ fontSize: 16, padding: '8px 16px', whiteSpace: 'nowrap' }}>
-              {design.status}
-            </span>
           </div>
-        </div>
-      </header>
 
-      {/* Edit modal */}
-      {editMode && editForm && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto', margin: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0 }}>Design bewerken</h2>
-              <button onClick={() => setEditMode(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#6b7280' }}>×</button>
-            </div>
-            <div className="form-group">
-              <label>Naam</label>
-              <input value={editForm.designName} onChange={(e) => setEditForm({ ...editForm, designName: e.target.value })} />
-            </div>
-            <div className="form-group">
-              <label>Stijlfamilie</label>
-              <input value={editForm.styleFamily} onChange={(e) => setEditForm({ ...editForm, styleFamily: e.target.value })} placeholder="bijv. Modern, Botanisch" />
-            </div>
-            <div className="form-group">
-              <label>Collecties (komma-gescheiden)</label>
-              <input value={editForm.collections} onChange={(e) => setEditForm({ ...editForm, collections: e.target.value })} placeholder="bijv. Lente, Natuur" />
-            </div>
-            <div className="form-group">
-              <label>Kleurtags (komma-gescheiden)</label>
-              <input value={editForm.colorTags} onChange={(e) => setEditForm({ ...editForm, colorTags: e.target.value })} placeholder="bijv. Groen, Blauw" />
-            </div>
-            <div className="form-group">
-              <label>Producttypes</label>
-              <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-                {[
-                  { key: 'inductionFriendly', label: 'Inductiebeschermer' },
-                  { key: 'circleFriendly', label: 'Muurcirkel' },
-                  { key: 'splashFriendly', label: 'Spatscherm' },
-                ].map(({ key, label }) => (
-                  <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
-                    <input
-                      type="checkbox"
-                      checked={editForm[key as keyof typeof editForm] as boolean}
-                      onChange={(e) => setEditForm({ ...editForm, [key]: e.target.checked })}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-              <button className="btn btn-primary" onClick={saveEdit} disabled={saving}>
-                {saving ? 'Opslaan...' : 'Opslaan'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setEditMode(false)}>
-                Annuleren
-              </button>
-            </div>
+          {/* Workflow progress */}
+          <div style={{ marginTop: 10 }}>
+            <WorkflowProgress design={design} savedMockups={savedMockups} savedPrintFiles={savedPrintFiles} />
           </div>
-        </div>
-      )}
 
-      {/* Publish banner */}
-      {publishResult && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 20,
-            borderLeft: `4px solid ${publishResult.error ? '#ef4444' : '#22c55e'}`,
-            background: publishResult.error ? '#fef2f2' : '#f0fdf4',
-          }}
-        >
-          {publishResult.error ? (
-            <p style={{ color: '#dc2626' }}>Publiceren mislukt: {publishResult.error}</p>
-          ) : (
-            <p style={{ color: '#16a34a' }}>
-              Gepubliceerd naar Shopify! Product ID: <strong>{publishResult.shopifyProductId}</strong>
-              {publishResult.handle && <> — Handle: <strong>{publishResult.handle}</strong></>}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="grid grid-3" style={{ marginBottom: 30 }}>
-        <div className="card">
-          <h2>Producttypes</h2>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <span className={design.inductionFriendly ? 'badge badge-approved' : 'badge badge-draft'}>Inductiebeschermer</span>
-            <span className={design.circleFriendly ? 'badge badge-approved' : 'badge badge-draft'}>Muurcirkel</span>
-            <span className={design.splashFriendly ? 'badge badge-approved' : 'badge badge-draft'}>Spatscherm</span>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 0, marginTop: 12, borderTop: '1px solid #f3f4f6' }}>
+            {([
+              { id: 'overview',    label: 'Overzicht' },
+              { id: 'mockups',     label: 'Mockups' },
+              { id: 'printfiles',  label: 'Printbestanden' },
+              { id: 'content',     label: 'Content' },
+              { id: 'variants',    label: 'Varianten' },
+            ] as { id: TabId; label: string }[]).map((tab) => {
+              const badge = tabBadges[tab.id]
+              const active = activeTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{
+                    padding: '8px 16px',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
+                    color: active ? '#2563eb' : '#6b7280',
+                    fontWeight: active ? 600 : 400,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'color 0.15s',
+                    marginBottom: -1,
+                  }}
+                >
+                  {tab.label}
+                  {badge != null && badge > 0 && (
+                    <span style={{
+                      background: active ? '#2563eb' : '#e5e7eb',
+                      color: active ? '#fff' : '#6b7280',
+                      borderRadius: 20, fontSize: 10, fontWeight: 700,
+                      padding: '1px 6px', lineHeight: '16px',
+                    }}>{badge}</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
-        </div>
-
-        <div className="card">
-          <h2>Collecties</h2>
-          <p>{design.collections ? JSON.parse(design.collections).join(', ') : 'Geen'}</p>
-        </div>
-
-        <div className="card">
-          <h2>Kleuren</h2>
-          <p>{design.colorTags ? JSON.parse(design.colorTags).join(', ') : 'Geen'}</p>
         </div>
       </div>
 
-      <div className="grid grid-2" style={{ marginBottom: 30 }}>
-        <div className="card">
-          <h2>Workflowstappen</h2>
-          <div className="workflow-steps">
-            {design.workflowSteps.map((step) => (
-              <span key={step.id} className={`step ${getStepStatusClass(step.status)}`}>
-                {step.step.replace(/_/g, ' ')}
-              </span>
-            ))}
-            {design.workflowSteps.length === 0 && (
-              <p style={{ color: '#666', fontSize: 13 }}>Nog geen workflowstappen</p>
+      {/* ── Tab content ── */}
+      <div style={{ paddingTop: 24 }}>
+
+        {/* ── Edit modal ── */}
+        {editMode && editForm && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="card" style={{ width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto', margin: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <h2 style={{ margin: 0 }}>Design bewerken</h2>
+                <button onClick={() => setEditMode(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: '#6b7280' }}>×</button>
+              </div>
+              <div className="form-group">
+                <label>Naam</label>
+                <input value={editForm.designName} onChange={(e) => setEditForm({ ...editForm, designName: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Stijlfamilie</label>
+                <input value={editForm.styleFamily} onChange={(e) => setEditForm({ ...editForm, styleFamily: e.target.value })} placeholder="bijv. Modern, Botanisch" />
+              </div>
+              <div className="form-group">
+                <label>Collecties (komma-gescheiden)</label>
+                <input value={editForm.collections} onChange={(e) => setEditForm({ ...editForm, collections: e.target.value })} placeholder="bijv. Lente, Natuur" />
+              </div>
+              <div className="form-group">
+                <label>Kleurtags (komma-gescheiden)</label>
+                <input value={editForm.colorTags} onChange={(e) => setEditForm({ ...editForm, colorTags: e.target.value })} placeholder="bijv. Groen, Blauw" />
+              </div>
+              <div className="form-group">
+                <label>Producttypes</label>
+                <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+                  {[
+                    { key: 'inductionFriendly', label: 'Inductiebeschermer' },
+                    { key: 'circleFriendly', label: 'Muurcirkel' },
+                    { key: 'splashFriendly', label: 'Spatscherm' },
+                  ].map(({ key, label }) => (
+                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
+                      <input
+                        type="checkbox"
+                        checked={editForm[key as keyof typeof editForm] as boolean}
+                        onChange={(e) => setEditForm({ ...editForm, [key]: e.target.checked })}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button className="btn btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Opslaan...' : 'Opslaan'}</button>
+                <button className="btn btn-secondary" onClick={() => setEditMode(false)}>Annuleren</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════ OVERZICHT */}
+        {activeTab === 'overview' && (
+          <div>
+            {/* Publish banner */}
+            {publishResult && (
+              <div className="card" style={{ marginBottom: 20, borderLeft: `4px solid ${publishResult.error ? '#ef4444' : '#22c55e'}`, background: publishResult.error ? '#fef2f2' : '#f0fdf4' }}>
+                {publishResult.error
+                  ? <p style={{ color: '#dc2626' }}>Publiceren mislukt: {publishResult.error}</p>
+                  : <p style={{ color: '#16a34a' }}>Gepubliceerd naar Shopify! Product ID: <strong>{publishResult.shopifyProductId}</strong>{publishResult.handle && <> — Handle: <strong>{publishResult.handle}</strong></>}</p>
+                }
+              </div>
+            )}
+
+            <div className="grid grid-3" style={{ marginBottom: 24 }}>
+              {/* Large design preview */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                {design.driveFileId ? (
+                  <>
+                    <img
+                      src={`/api/drive-image/${design.driveFileId}`}
+                      alt={design.designName}
+                      onClick={() => design.driveFileId && setLightbox({ src: `/api/drive-image/${design.driveFileId}`, alt: design.designName })}
+                      style={{
+                        width: 160, height: 160,
+                        objectFit: 'contain',
+                        borderRadius: 10,
+                        border: '1px solid #e5e7eb',
+                        background: '#f9fafb',
+                        cursor: 'zoom-in',
+                      }}
+                    />
+                    <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center' }}>Klik om te vergroten</p>
+                  </>
+                ) : (
+                  <div style={{ width: 160, height: 160, borderRadius: 10, border: '2px dashed #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 13 }}>
+                    Geen afbeelding
+                  </div>
+                )}
+              </div>
+
+              <div className="card">
+                <h2>Producttypes</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[
+                    { key: 'inductionFriendly', label: 'Inductiebeschermer' },
+                    { key: 'circleFriendly', label: 'Muurcirkel' },
+                    { key: 'splashFriendly', label: 'Spatscherm' },
+                  ].map(({ key, label }) => {
+                    const on = design[key as keyof Design] as boolean
+                    return (
+                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? '#10b981' : '#e5e7eb', flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, color: on ? '#065f46' : '#9ca3af' }}>{label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="card">
+                <h2>Collecties & Kleuren</h2>
+                <p style={{ fontSize: 13, color: '#374151', marginBottom: 6 }}>
+                  {design.collections ? JSON.parse(design.collections).join(', ') : <span style={{ color: '#9ca3af' }}>Geen collecties</span>}
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                  {design.colorTags ? JSON.parse(design.colorTags).map((tag: string) => (
+                    <span key={tag} style={{ background: '#f3f4f6', color: '#374151', borderRadius: 12, padding: '2px 8px', fontSize: 11 }}>{tag}</span>
+                  )) : <span style={{ fontSize: 13, color: '#9ca3af' }}>Geen kleurtags</span>}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-2" style={{ marginBottom: 24 }}>
+              {/* Workflow steps */}
+              <div className="card">
+                <h2>Workflowstappen</h2>
+                <div className="workflow-steps">
+                  {design.workflowSteps.map((step) => (
+                    <span key={step.id} className={`step ${getStepStatusClass(step.status)}`}>
+                      {step.step.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                  {design.workflowSteps.length === 0 && <p style={{ color: '#666', fontSize: 13 }}>Nog geen workflowstappen</p>}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="card">
+                <h2>Acties</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* Stap 1: Varianten */}
+                  <ActionRow
+                    label="Varianten"
+                    status={design.variants.length > 0 ? `${design.variants.length} aangemaakt` : undefined}
+                    statusOk={design.variants.length > 0}
+                  >
+                    <button className="btn btn-secondary" style={{ fontSize: 12, padding: '5px 12px' }} onClick={generateVariants} disabled={generating}>
+                      {generating ? 'Aanmaken...' : design.variants.length > 0 ? 'Opnieuw aanmaken' : 'Varianten aanmaken'}
+                    </button>
+                  </ActionRow>
+
+                  {/* Stap 2: Content */}
+                  <ActionRow
+                    label="NL Content"
+                    status={nlContent ? 'Gegenereerd' : undefined}
+                    statusOk={!!nlContent}
+                    hint={!nlContent ? undefined : undefined}
+                  >
+                    <button
+                      className={nlContent ? 'btn btn-secondary' : 'btn btn-success'}
+                      style={{ fontSize: 12, padding: '5px 12px' }}
+                      onClick={() => generateContent(getProductType(design))}
+                      disabled={generating}
+                    >
+                      {generating ? 'Genereren...' : nlContent ? 'Opnieuw genereren' : 'Genereren (AI)'}
+                    </button>
+                  </ActionRow>
+
+                  {/* Stap 3: Mockups */}
+                  <ActionRow
+                    label="Mockups"
+                    status={savedMockups.length > 0 ? `${savedMockups.length} gegenereerd` : undefined}
+                    statusOk={savedMockups.length > 0}
+                    hint={design.variants.length === 0 ? 'Maak eerst varianten aan' : undefined}
+                  >
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: '5px 12px' }}
+                      onClick={() => { setActiveTab('mockups'); setTimeout(generateMockups, 100) }}
+                      disabled={generatingMockups || design.variants.length === 0}
+                    >
+                      {generatingMockups ? 'Genereren...' : savedMockups.length > 0 ? 'Opnieuw genereren' : 'Genereren'}
+                    </button>
+                  </ActionRow>
+
+                  {/* Stap 4: Printbestanden (alleen IB) */}
+                  {hasIB && (
+                    <ActionRow
+                      label="Printbestanden"
+                      status={savedPrintFiles.length > 0 ? `${savedPrintFiles.length} PDF's klaar` : undefined}
+                      statusOk={savedPrintFiles.length > 0}
+                      hint={!design.driveFileId ? 'Upload eerst een designbestand' : undefined}
+                    >
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '5px 12px' }}
+                        onClick={() => { setActiveTab('printfiles'); setTimeout(generatePrintFiles, 100) }}
+                        disabled={generatingPrintFiles || !design.driveFileId}
+                      >
+                        {generatingPrintFiles ? 'Genereren...' : savedPrintFiles.length > 0 ? 'Opnieuw genereren' : 'Genereren'}
+                      </button>
+                    </ActionRow>
+                  )}
+
+                  {/* Stap 5: Shopify */}
+                  <ActionRow
+                    label="Shopify publiceren"
+                    status={alreadyOnShopify ? `Gepubliceerd · ${shopifyVariantId}` : undefined}
+                    statusOk={alreadyOnShopify}
+                    hint={
+                      !shopifyConfigured ? 'Shopify niet geconfigureerd'
+                      : !nlContent ? 'NL content is vereist'
+                      : design.variants.length === 0 ? 'Varianten zijn vereist'
+                      : undefined
+                    }
+                  >
+                    {alreadyOnShopify ? null : (
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 12, padding: '5px 12px', background: canPublish ? '#7c3aed' : undefined }}
+                        onClick={publishToShopify}
+                        disabled={publishing || !canPublish}
+                      >
+                        {publishing ? 'Publiceren...' : 'Publiceren'}
+                      </button>
+                    )}
+                  </ActionRow>
+
+                  {/* Fork naar ander producttype */}
+                  {(() => {
+                    const otherTypes = ([
+                      { type: 'IB' as const, label: 'Inductiebeschermer', enabled: !design.inductionFriendly },
+                      { type: 'SP' as const, label: 'Spatscherm', enabled: !design.splashFriendly },
+                      { type: 'MC' as const, label: 'Muurcirkel', enabled: !design.circleFriendly },
+                    ] as const).filter((t) => t.enabled)
+                    if (otherTypes.length === 0) return null
+                    return (
+                      <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+                        <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>Variant aanmaken voor ander producttype:</p>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {otherTypes.map(({ type, label }) => (
+                            <button
+                              key={type}
+                              className="btn btn-secondary"
+                              style={{ fontSize: 11, padding: '4px 10px' }}
+                              onClick={() => forkDesign(type)}
+                              disabled={forking}
+                              title={`Nieuw ${label}-product aanmaken`}
+                            >
+                              {forking ? '...' : `+ ${type}`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Missing PSD templates warning */}
+            {mockupStatus && mockupStatus.readyCount < mockupStatus.totalCount && (
+              <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid #f59e0b', background: '#fffbeb' }}>
+                <h2 style={{ color: '#92400e' }}>Ontbrekende PSD templates</h2>
+                <ul style={{ fontSize: 12, color: '#78350f', margin: 0, paddingLeft: 20 }}>
+                  {mockupStatus.templates.filter((t) => !t.ready).map((t) => (
+                    <li key={t.id} style={{ marginBottom: 4 }}><code>{t.file}</code></li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
-        </div>
+        )}
 
-        <div className="card">
-          <h2>Acties</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button className="btn btn-primary" onClick={generateVariants} disabled={generating}>
-              {generating ? 'Aanmaken...' : `Varianten aanmaken (${design.variants.length} bestaand)`}
-            </button>
-
-            {!nlContent ? (
-              <button className="btn btn-success" onClick={() => generateContent(getProductType(design))} disabled={generating}>
-                {generating ? 'Genereren...' : 'NL Content genereren (AI)'}
-              </button>
-            ) : (
-              <button className="btn btn-secondary" onClick={() => generateContent(getProductType(design))} disabled={generating}>
-                {generating ? 'Genereren...' : 'NL Content opnieuw genereren'}
-              </button>
-            )}
-
-            {/* Mockups genereren */}
-            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, marginTop: 4 }}>
-              {mockupStatus && (
-                <p style={{ fontSize: 12, color: mockupStatus.readyCount === 0 ? '#f59e0b' : '#16a34a', marginBottom: 6 }}>
-                  PSD templates gereed: {mockupStatus.readyCount}/{mockupStatus.totalCount}
-                </p>
-              )}
-              {generatingMockups && mockupProgress && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    Photoshop werkt... (kan enkele minuten duren)
-                  </div>
-                  <div style={{ background: '#e5e7eb', borderRadius: 4, height: 6, overflow: 'hidden' }}>
-                    <div style={{
-                      background: '#2563eb',
-                      height: '100%',
-                      width: mockupProgress.total > 0
-                        ? `${Math.round((mockupProgress.current / mockupProgress.total) * 100)}%`
-                        : '100%',
-                      transition: 'width 0.3s',
-                      animation: 'pulse 1.5s ease-in-out infinite',
-                    }} />
-                  </div>
-                </div>
-              )}
-              <button
-                className="btn btn-secondary"
-                onClick={generateMockups}
-                disabled={generatingMockups || design.variants.length === 0}
-                title={design.variants.length === 0 ? 'Maak eerst varianten aan' : 'Genereer alle mockups (generiek + maat-specifiek)'}
-              >
-                {generatingMockups
-                  ? 'Mockups genereren...'
-                  : savedMockups.length > 0
-                    ? `Alle mockups opnieuw genereren (${savedMockups.length} opgeslagen)`
-                    : 'Alle mockups genereren'}
-              </button>
-            </div>
-
-            {/* Publiceren naar Shopify */}
-            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, marginTop: 4 }}>
-              {alreadyOnShopify ? (
-                <p style={{ fontSize: 13, color: '#16a34a', marginBottom: 6 }}>
-                  Op Shopify — ID: {shopifyVariantId}
-                </p>
-              ) : !shopifyConfigured ? (
-                <p style={{ fontSize: 12, color: '#9ca3af' }}>
-                  Shopify niet geconfigureerd
-                </p>
-              ) : (
+        {/* ═══════════════════════════════════════════════════════════ MOCKUPS */}
+        {activeTab === 'mockups' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Mockups</h2>
+                {mockupStatus && (
+                  <p style={{ fontSize: 12, color: mockupStatus.readyCount === mockupStatus.totalCount ? '#16a34a' : '#f59e0b', marginTop: 4 }}>
+                    PSD templates gereed: {mockupStatus.readyCount}/{mockupStatus.totalCount}
+                  </p>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {savedMockups.length > 0 && !generatingMockups && (
+                  <button className="btn btn-danger" style={{ fontSize: 12 }} onClick={deleteAllMockups} disabled={deletingMockups}>
+                    {deletingMockups ? 'Verwijderen...' : 'Alle verwijderen'}
+                  </button>
+                )}
                 <button
                   className="btn btn-primary"
-                  onClick={publishToShopify}
-                  disabled={publishing || !canPublish}
-                  title={
-                    !nlContent ? 'NL content is eerst vereist'
-                    : design.variants.length === 0 ? 'Varianten zijn eerst vereist'
-                    : 'Publiceer naar Shopify als concept'
-                  }
-                  style={{ background: canPublish ? '#7c3aed' : undefined }}
+                  onClick={generateMockups}
+                  disabled={generatingMockups || design.variants.length === 0}
                 >
-                  {publishing ? 'Publiceren...' : 'Publiceren naar Shopify'}
+                  {generatingMockups ? 'Genereren...' : savedMockups.length > 0 ? 'Opnieuw genereren' : 'Genereer mockups'}
                 </button>
-              )}
+              </div>
             </div>
 
-            {/* Fork naar ander producttype */}
+            {design.variants.length === 0 && (
+              <DisabledHint>Maak eerst varianten aan via het Overzicht-tabblad.</DisabledHint>
+            )}
+
+            {generatingMockups && mockupProgress && (
+              <ProgressBar current={mockupProgress.current} total={mockupProgress.total} label="Photoshop werkt... (kan 10-20 minuten duren)" />
+            )}
+
+            {!generatingMockups && displayMockups.length === 0 && (
+              <p style={{ color: '#9ca3af', fontSize: 13 }}>Nog geen mockups gegenereerd.</p>
+            )}
+
+            {displayMockups.length > 0 && (
+              <>
+                {/* Generic mockups */}
+                {(() => {
+                  const generic = displayMockups.filter((r) => !(r as DesignMockup).sizeKey)
+                  if (generic.length === 0) return null
+                  return (
+                    <div style={{ marginBottom: 32 }}>
+                      <SectionLabel>Generieke mockups</SectionLabel>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                        {generic.map((r) => {
+                          const fileId = (r as DesignMockup).driveFileId || r.driveUrl.match(/[?&]id=([^&]+)/)?.[1] || r.driveUrl.match(/\/d\/([^/]+)\//)?.[1]
+                          const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : r.driveUrl
+                          const displayName = (r as MockupGenerateResult).label || (r as DesignMockup).outputName || r.outputName
+                          const isRegen = regeneratingMockup === r.templateId
+                          const imgSrc = fileId ? `/api/drive-image/${fileId}` : r.driveUrl
+                          return (
+                            <MockupCard
+                              key={r.templateId}
+                              name={displayName}
+                              imgSrc={imgSrc}
+                              altText={(r as DesignMockup).altText || displayName}
+                              viewUrl={viewUrl}
+                              isNew={(r as MockupGenerateResult & { isNew?: boolean }).isNew}
+                              skipped={r.skipped}
+                              skipReason={r.skipReason}
+                              isRegenerating={isRegen}
+                              canRegenerate={!regeneratingMockup && !generatingMockups}
+                              onRegenerate={() => regenerateMockup(r.templateId)}
+                              onLightbox={() => setLightbox({ src: imgSrc, alt: displayName })}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Size-specific mockups per variant */}
+                {(() => {
+                  const sized = displayMockups.filter((r) => !!(r as DesignMockup).sizeKey)
+                  if (sized.length === 0) return null
+                  return (
+                    <div>
+                      <SectionLabel>Maat-specifieke mockups</SectionLabel>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        {design.variants.map((v) => {
+                          const vSizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
+                          const variantMockups = sized.filter((r) => (r as DesignMockup).sizeKey === vSizeKey)
+                          return (
+                            <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{v.productType} — {v.size}</span>
+                                <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{v.sku}</span>
+                              </div>
+                              {variantMockups.length > 0 ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                                  {variantMockups.map((m) => {
+                                    const fileId = (m as DesignMockup).driveFileId || ''
+                                    const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
+                                    const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
+                                    const imgSrc = fileId ? `/api/drive-image/${fileId}` : ''
+                                    return (
+                                      <MockupCard
+                                        key={m.templateId}
+                                        name={displayName}
+                                        imgSrc={imgSrc}
+                                        altText={(m as DesignMockup).altText || displayName}
+                                        viewUrl={viewUrl}
+                                        isRegenerating={regeneratingMockup === m.templateId}
+                                        canRegenerate={!regeneratingMockup && !generatingMockups}
+                                        onRegenerate={() => regenerateMockup(m.templateId)}
+                                        onLightbox={() => setLightbox({ src: imgSrc, alt: displayName })}
+                                      />
+                                    )
+                                  })}
+                                </div>
+                              ) : (
+                                <p style={{ fontSize: 12, color: '#9ca3af' }}>Geen maat-specifieke mockup voor deze maat.</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════ PRINTBESTANDEN */}
+        {activeTab === 'printfiles' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Printbestanden</h2>
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  Productie-klare PDF's met CutContour, 10mm bleed, 150 dpi
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {savedPrintFiles.length > 0 && (
+                  <button className="btn btn-danger" style={{ fontSize: 12 }} onClick={deleteAllPrintFiles} disabled={deletingPrintFiles}>
+                    {deletingPrintFiles ? 'Verwijderen...' : 'Alle verwijderen'}
+                  </button>
+                )}
+                <button
+                  className="btn btn-primary"
+                  onClick={generatePrintFiles}
+                  disabled={generatingPrintFiles || !design.driveFileId || !hasIB}
+                >
+                  {generatingPrintFiles ? 'Genereren...' : savedPrintFiles.length > 0 ? 'Opnieuw genereren' : 'Genereer printbestanden'}
+                </button>
+              </div>
+            </div>
+
+            {!hasIB && (
+              <DisabledHint>Printbestanden zijn alleen beschikbaar voor Inductiebeschermer (IB) varianten.</DisabledHint>
+            )}
+            {hasIB && !design.driveFileId && (
+              <DisabledHint>Upload eerst een designbestand voordat je printbestanden kunt genereren.</DisabledHint>
+            )}
+
+            {generatingPrintFiles && printProgress && (
+              <ProgressBar current={printProgress.current} total={printProgress.total} label="PDF's worden gegenereerd via pdf-lib..." />
+            )}
+
             {(() => {
-              const otherTypes: { type: 'IB' | 'SP' | 'MC'; label: string; enabled: boolean }[] = (
-                [
-                  { type: 'IB' as const, label: 'Inductiebeschermer', enabled: !design.inductionFriendly },
-                  { type: 'SP' as const, label: 'Spatscherm', enabled: !design.splashFriendly },
-                  { type: 'MC' as const, label: 'Muurcirkel', enabled: !design.circleFriendly },
-                ] as const
-              ).filter((t) => t.enabled)
-              if (otherTypes.length === 0) return null
+              const displayFiles = newPrintFileResults ?? savedPrintFiles
+              if (displayFiles.length === 0 && !generatingPrintFiles) {
+                return <p style={{ color: '#9ca3af', fontSize: 13 }}>Nog geen printbestanden gegenereerd.</p>
+              }
               return (
-                <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, marginTop: 4 }}>
-                  <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Maak variant voor ander producttype:</p>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {otherTypes.map(({ type, label }) => (
-                      <button
-                        key={type}
-                        className="btn btn-secondary"
-                        style={{ fontSize: 12 }}
-                        onClick={() => forkDesign(type)}
-                        disabled={forking}
-                        title={`Nieuw ${label}-product aanmaken met hetzelfde design`}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {displayFiles.map((file) => {
+                    const isResult = 'skipped' in file
+                    const sizeKey = file.sizeKey
+                    const fileName = file.fileName
+                    const driveUrl = file.driveUrl
+                    const skipped = isResult ? (file as PrintFileResult).skipped : false
+                    const skipReason = isResult ? (file as PrintFileResult).skipReason : undefined
+                    const isRegen = regeneratingPrintFile === sizeKey
+                    const createdAt = !isResult ? (file as DesignPrintFile).createdAt : undefined
+
+                    return (
+                      <div
+                        key={sizeKey || fileName}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          padding: '12px 16px',
+                          border: `1px solid ${skipped ? '#fecaca' : '#e5e7eb'}`,
+                          borderRadius: 8,
+                          background: skipped ? '#fef2f2' : '#fff',
+                          transition: 'box-shadow 0.15s',
+                        }}
                       >
-                        {forking ? '...' : `+ ${type} aanmaken`}
-                      </button>
-                    ))}
-                  </div>
+                        {/* PDF icon */}
+                        <div style={{
+                          width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+                          background: skipped ? '#fecaca' : '#fee2e2',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: skipped ? '#991b1b' : '#dc2626', letterSpacing: 0.5 }}>PDF</span>
+                        </div>
+
+                        {/* File info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: skipped ? '#991b1b' : '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {fileName || `ib-${design.designCode.toLowerCase()}-${sizeKey?.replace('x', '-')}.pdf`}
+                          </div>
+                          {skipped ? (
+                            <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{skipReason}</div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2, display: 'flex', gap: 12 }}>
+                              <span>{file.widthMM}×{file.heightMM} mm</span>
+                              <span style={{ color: '#d1d5db' }}>·</span>
+                              <span style={{ fontFamily: 'monospace' }}>{sizeKey}</span>
+                              {createdAt && (
+                                <>
+                                  <span style={{ color: '#d1d5db' }}>·</span>
+                                  <span>{new Date(createdAt).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+                          {!skipped && driveUrl && (
+                            <a
+                              href={driveUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-secondary"
+                              style={{ fontSize: 11, padding: '5px 12px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <span style={{ fontSize: 13 }}>↗</span> Drive
+                            </a>
+                          )}
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: 11, padding: '5px 12px' }}
+                            onClick={() => regeneratePrintFile(sizeKey)}
+                            disabled={isRegen || generatingPrintFiles}
+                            title="Printbestand opnieuw genereren"
+                          >
+                            {isRegen ? '...' : '↺ Opnieuw'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })()}
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Mockups sectie */}
-      {(displayMockups.length > 0 || generatingMockups || savedMockups.length > 0) && (
-        <div className="card" style={{ marginBottom: 30 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ margin: 0 }}>
-              Mockups
-              {savedMockups.length > 0 && !newMockupResults && (
-                <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 400, marginLeft: 8 }}>
-                  ({savedMockups.length} opgeslagen)
-                </span>
-              )}
-              {newMockupResults && (
-                <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 400, marginLeft: 8 }}>
-                  {newMockupResults.filter((r) => !r.skipped).length} gegenereerd
-                </span>
-              )}
-            </h2>
-            {savedMockups.length > 0 && !generatingMockups && (
-              <button
-                className="btn btn-danger"
-                style={{ fontSize: 12 }}
-                onClick={deleteAllMockups}
-                disabled={deletingMockups}
-                title="Verwijder alle mockups uit de database zodat je opnieuw kunt beginnen"
-              >
-                {deletingMockups ? 'Verwijderen...' : 'Alle mockups verwijderen'}
+        {/* ═══════════════════════════════════════════════════════════ CONTENT */}
+        {activeTab === 'content' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+            {(['nl', 'de', 'en'] as const).map((lang) => {
+              const c = lang === 'nl' ? nlContent : lang === 'de' ? deContent : enContent
+              const editing = contentEditMode[lang]
+              const vals = contentEditValues[lang]
+              const isSaving = contentSaving[lang]
+              const langLabel = { nl: 'Nederlands', de: 'Deutsch', en: 'English' }[lang]
+
+              return (
+                <div className="card" key={lang}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <h2 style={{ margin: 0 }}>
+                      <span style={{ fontSize: 16, marginRight: 6 }}>{lang === 'nl' ? '🇳🇱' : lang === 'de' ? '🇩🇪' : '🇬🇧'}</span>
+                      {langLabel}
+                    </h2>
+                    {c && !editing && (
+                      <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={() => openContentEdit(lang, c)}>Bewerken</button>
+                    )}
+                  </div>
+
+                  {c ? (
+                    editing && vals ? (
+                      <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {[
+                          { field: 'altText' as const, label: 'Alt Text', type: 'input' },
+                          { field: 'seoTitle' as const, label: 'SEO Title', type: 'input' },
+                          { field: 'seoDescription' as const, label: 'SEO Description', type: 'textarea2' },
+                          { field: 'description' as const, label: 'Beschrijving', type: 'textarea6' },
+                        ].map(({ field, label, type }) => (
+                          <div className="form-group" style={{ margin: 0 }} key={field}>
+                            <label style={{ fontSize: 11 }}>{label}</label>
+                            {type === 'input'
+                              ? <input value={vals[field]} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], [field]: e.target.value } }))} />
+                              : <textarea rows={type === 'textarea6' ? 6 : 2} value={vals[field]} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], [field]: e.target.value } }))} style={{ resize: 'vertical' }} />
+                            }
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn btn-primary btn-sm" onClick={() => saveContentEdit(lang)} disabled={isSaving}>{isSaving ? 'Opslaan...' : 'Opslaan'}</button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => cancelContentEdit(lang)} disabled={isSaving}>Annuleren</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <ContentField label="Alt Text" value={c.altText} />
+                          <ContentField label="SEO Title" value={c.seoTitle} />
+                          <ContentField label="SEO Description" value={c.seoDescription} />
+                        </div>
+                        <details style={{ marginTop: 12 }}>
+                          <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: 12 }}>Beschrijving tonen</summary>
+                          <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{c.description}</p>
+                        </details>
+                        {c.translationStatus && lang !== 'nl' && (
+                          <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Status: {c.translationStatus}</p>
+                        )}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                          {lang === 'nl' && (
+                            <>
+                              <button className="btn btn-secondary btn-sm" onClick={() => generateContent(getProductType(design))} disabled={generating}>
+                                {generating ? 'Genereren...' : 'Opnieuw genereren'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => translateContent('de')} disabled={translating === 'de'}>
+                                {translating === 'de' ? 'Vertalen...' : deContent ? '→ DE opnieuw' : '→ DE vertalen'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => translateContent('en')} disabled={translating === 'en'}>
+                                {translating === 'en' ? 'Vertalen...' : enContent ? '→ EN opnieuw' : '→ EN vertalen'}
+                              </button>
+                            </>
+                          )}
+                          {lang !== 'nl' && (
+                            <button className="btn btn-secondary btn-sm" onClick={() => translateContent(lang)} disabled={translating === lang}>
+                              {translating === lang ? 'Vertalen...' : 'Opnieuw vertalen'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <div>
+                      <p style={{ color: '#9ca3af', marginBottom: 12, fontSize: 13 }}>
+                        {lang === 'nl' ? 'Nog geen Nederlandse content.' : nlContent ? 'Nog niet vertaald.' : 'Genereer eerst NL content.'}
+                      </p>
+                      {lang === 'nl' && (
+                        <button className="btn btn-success btn-sm" onClick={() => generateContent(getProductType(design))} disabled={generating}>
+                          {generating ? 'Genereren...' : 'NL Content genereren (AI)'}
+                        </button>
+                      )}
+                      {lang !== 'nl' && nlContent && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => translateContent(lang)} disabled={translating === lang}>
+                          {translating === lang ? 'Vertalen...' : `Vertalen → ${lang.toUpperCase()}`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════ VARIANTEN */}
+        {activeTab === 'variants' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0 }}>Varianten ({design.variants.length})</h2>
+              <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={generateVariants} disabled={generating}>
+                {generating ? 'Aanmaken...' : design.variants.length > 0 ? 'Opnieuw aanmaken' : 'Varianten aanmaken'}
               </button>
+            </div>
+            {design.variants.length > 0 ? (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 700 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                      {['Type', 'Maat (mm)', 'Materiaal', 'SKU', 'EAN', 'Prijs', 'Gewicht (g)', 'Shopify ID'].map((h) => (
+                        <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {design.variants.map((v, i) => (
+                      <tr key={v.id} style={{ borderBottom: '1px solid #f5f5f5', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                        <td style={{ padding: '7px 12px' }}><span className="badge badge-draft" style={{ fontSize: 10 }}>{v.productType}</span></td>
+                        <td style={{ padding: '7px 12px', fontWeight: 500 }}>{v.size}</td>
+                        <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.material ?? '—'}</td>
+                        <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: '#374151' }}>{v.sku}</td>
+                        <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.ean || '—'}</td>
+                        <td style={{ padding: '7px 12px', fontWeight: 500 }}>{v.price != null ? `€${v.price.toFixed(2)}` : '—'}</td>
+                        <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.weight != null ? Math.round(v.weight * 1000) : '—'}</td>
+                        <td style={{ padding: '7px 12px', fontFamily: 'monospace', fontSize: 10, color: v.shopifyProductId ? '#16a34a' : '#9ca3af' }}>
+                          {v.shopifyProductId || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af' }}>
+                <p style={{ marginBottom: 12 }}>Nog geen varianten aangemaakt.</p>
+                <button className="btn btn-primary" onClick={generateVariants} disabled={generating}>
+                  {generating ? 'Aanmaken...' : 'Varianten aanmaken'}
+                </button>
+              </div>
             )}
           </div>
+        )}
 
-          {generatingMockups ? (
-            <div style={{ padding: '30px 0', textAlign: 'center', color: '#6b7280' }}>
-              <p>Photoshop genereert mockups... Dit kan 10-20 minuten duren (alle templates).</p>
+      </div>
+    </div>
+  )
+}
+
+// ─── Small reusable sub-components ───────────────────────────────────────────
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+      {children}
+    </p>
+  )
+}
+
+function DisabledHint({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ background: '#fefce8', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 16 }}>⚠</span>
+      {children}
+    </div>
+  )
+}
+
+function ProgressBar({ current, total, label }: { current: number; total: number; label: string }) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 100
+  return (
+    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+      <div style={{ fontSize: 13, color: '#1d4ed8', marginBottom: 8 }}>{label}</div>
+      <div style={{ background: '#dbeafe', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+        <div style={{
+          background: '#2563eb', height: '100%',
+          width: `${pct}%`,
+          transition: 'width 0.3s',
+          animation: current < total ? 'pulse 1.5s ease-in-out infinite' : 'none',
+        }} />
+      </div>
+      {total > 0 && <p style={{ fontSize: 11, color: '#3b82f6', marginTop: 6 }}>{current}/{total}</p>}
+    </div>
+  )
+}
+
+function ActionRow({
+  label, status, statusOk, hint, children,
+}: {
+  label: string
+  status?: string
+  statusOk?: boolean
+  hint?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, justifyContent: 'space-between' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>{label}</div>
+        {status && (
+          <div style={{ fontSize: 11, color: statusOk ? '#16a34a' : '#6b7280', marginTop: 2 }}>
+            {statusOk ? '✓ ' : ''}{status}
+          </div>
+        )}
+        {hint && !status && (
+          <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 2 }}>⚠ {hint}</div>
+        )}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  )
+}
+
+function ContentField({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null
+  return (
+    <div>
+      <span style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</span>
+      <p style={{ margin: '2px 0 0', fontSize: 12, color: '#374151' }}>{value}</p>
+    </div>
+  )
+}
+
+function MockupCard({
+  name, imgSrc, altText, viewUrl, isNew, skipped, skipReason,
+  isRegenerating, canRegenerate, onRegenerate, onLightbox,
+}: {
+  name: string
+  imgSrc: string
+  altText: string
+  viewUrl: string
+  isNew?: boolean
+  skipped?: boolean
+  skipReason?: string
+  isRegenerating: boolean
+  canRegenerate: boolean
+  onRegenerate: () => void
+  onLightbox: () => void
+}) {
+  return (
+    <div style={{
+      border: `1px solid ${isNew ? '#bbf7d0' : '#e5e7eb'}`,
+      borderRadius: 10,
+      overflow: 'hidden',
+      width: 240,
+      background: isNew ? '#f0fdf4' : '#fff',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    }}>
+      {skipped ? (
+        <div style={{ padding: 12 }}>
+          <p style={{ fontWeight: 600, fontSize: 12, color: '#374151', marginBottom: 4 }}>{name}</p>
+          <p style={{ fontSize: 11, color: '#f59e0b' }}>Overgeslagen: {skipReason}</p>
+        </div>
+      ) : (
+        <>
+          {/* Thumbnail */}
+          <div
+            style={{ height: 180, overflow: 'hidden', background: '#f9fafb', cursor: 'zoom-in', position: 'relative' }}
+            onClick={onLightbox}
+          >
+            <img
+              src={imgSrc}
+              alt={altText}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => {
+                const img = e.target as HTMLImageElement
+                if (!img.dataset.fallback) { img.dataset.fallback = '1'; img.src = viewUrl }
+              }}
+            />
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'rgba(0,0,0,0)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: 0, transition: 'opacity 0.15s',
+            }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; (e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0.2)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0'; (e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0)' }}
+            >
+              <span style={{ color: '#fff', fontSize: 26 }}>⤢</span>
             </div>
-          ) : displayMockups.length === 0 ? (
-            <p style={{ color: '#6b7280' }}>Geen mockups gegenereerd.</p>
-          ) : (
-            <>
-              {/* Generieke mockups */}
-              {(() => {
-                const genericMockups = displayMockups.filter((r) => !(r as DesignMockup).sizeKey)
-                if (genericMockups.length === 0) return null
-                return (
-                  <div style={{ marginBottom: 24 }}>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
-                      Generieke mockups
-                    </p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                      {genericMockups.map((r) => {
-                        const fileId = (r as DesignMockup).driveFileId || r.driveUrl.match(/[?&]id=([^&]+)/)?.[1] || r.driveUrl.match(/\/d\/([^/]+)\//)?.[1]
-                        const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : r.driveUrl
-                        const displayName = (r as MockupGenerateResult).label || (r as DesignMockup).outputName || r.outputName
-                        const isRegenerating = regeneratingMockup === r.templateId
-                        return (
-                          <div key={r.templateId} style={{
-                            border: '1px solid #e5e7eb',
-                            borderRadius: 8,
-                            padding: 10,
-                            minWidth: 170,
-                            maxWidth: 200,
-                            background: (r as MockupGenerateResult & { isNew?: boolean }).isNew ? '#f0fdf4' : '#fff',
-                          }}>
-                            <p style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: '#374151' }}>{displayName}</p>
-                            {r.skipped ? (
-                              <p style={{ fontSize: 11, color: '#f59e0b' }}>Overgeslagen: {r.skipReason}</p>
-                            ) : (
-                              <>
-                                <a href={viewUrl} target="_blank" rel="noopener noreferrer">
-                                  <img
-                                     src={fileId ? `/api/drive-image/${fileId}` : r.driveUrl}
-                                    alt={(r as DesignMockup).altText || displayName}
-                                    style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 140 }}
-                                    onError={(e) => {
-                                      const img = e.target as HTMLImageElement
-                                      if (!img.dataset.fallback) { img.dataset.fallback = '1'; img.src = r.driveUrl }
-                                    }}
-                                  />
-                                </a>
-                                {(r as DesignMockup).altText && (
-                                  <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 3, fontStyle: 'italic' }} title="Alt-tekst voor Shopify">
-                                    {(r as DesignMockup).altText}
-                                  </p>
-                                )}
-                                <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-                                  <a href={viewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#2563eb' }}>Openen</a>
-                                  <button
-                                    onClick={() => regenerateMockup(r.templateId)}
-                                    disabled={!!regeneratingMockup || generatingMockups}
-                                    style={{ fontSize: 10, color: '#6b7280', background: 'none', border: '1px solid #d1d5db', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}
-                                    title="Genereer deze mockup opnieuw"
-                                  >
-                                    {isRegenerating ? '...' : '↺'}
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {/* Size-specific mockups per variant */}
-              {design.variants.length > 0 && (() => {
-                // Use DB sizeKey field if available, else fallback to templateId heuristic
-                const sizeSpecificMockups = displayMockups.filter((r) => !!(r as DesignMockup).sizeKey)
-                if (sizeSpecificMockups.length === 0) return null
-                return (
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-                      Maat-specifieke mockups
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      {design.variants.map((v) => {
-                        const vSizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
-                        // Exact match only — the DB already stores the original variant sizeKey per row
-                        const variantMockups = sizeSpecificMockups.filter(
-                          (r) => (r as DesignMockup).sizeKey === vSizeKey
-                        )
-                        return (
-                          <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
-                                {v.productType} — {v.size}
-                              </span>
-                              <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.sku}</span>
-                            </div>
-                            {variantMockups.length > 0 ? (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                                {variantMockups.map((m) => {
-                                  const fileId = (m as DesignMockup).driveFileId || ''
-                                  const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
-                                  const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
-                                  const isRegenerating = regeneratingMockup === m.templateId
-                                  return (
-                                    <div key={m.templateId} style={{ width: 150 }}>
-                                      <p style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{displayName}</p>
-                                       <a href={viewUrl} target="_blank" rel="noopener noreferrer">
-                                         <img
-                                           src={fileId ? `/api/drive-image/${fileId}` : ''}
-                                           alt={(m as DesignMockup).altText || displayName}
-                                           style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
-                                         />
-                                      </a>
-                                      {(m as DesignMockup).altText && (
-                                        <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>
-                                          {(m as DesignMockup).altText}
-                                        </p>
-                                      )}
-                                      <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
-                                        <a href={viewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#2563eb' }}>Openen</a>
-                                        <button
-                                          onClick={() => regenerateMockup(m.templateId)}
-                                          disabled={!!regeneratingMockup || generatingMockups}
-                                          style={{ fontSize: 10, color: '#6b7280', background: 'none', border: '1px solid #d1d5db', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}
-                                          title="Genereer deze mockup opnieuw"
-                                        >
-                                          {isRegenerating ? '...' : '↺'}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            ) : (
-                              <p style={{ fontSize: 11, color: '#9ca3af' }}>Geen maat-specifieke mockup voor deze maat.</p>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })()}
-            </>
-          )}
-        </div>
-      )}
-
-
-      {/* Template status — alleen tonen als templates ontbreken */}
-      {mockupStatus && mockupStatus.readyCount < mockupStatus.totalCount && (
-        <div className="card" style={{ marginBottom: 30, borderLeft: '4px solid #f59e0b', background: '#fffbeb' }}>
-          <h2 style={{ color: '#92400e' }}>Ontbrekende PSD templates</h2>
-          <ul style={{ fontSize: 12, color: '#78350f', margin: 0, paddingLeft: 20 }}>
-            {mockupStatus.templates.filter((t: { ready: boolean; file?: string; id: string }) => !t.ready).map((t) => (
-              <li key={t.id} style={{ marginBottom: 4 }}>
-                <code>{t.file}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Printbestanden sectie */}
-      {design.variants.some((v) => v.productType === 'IB') && (
-        <div className="card" style={{ marginBottom: 30 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ margin: 0 }}>
-              Printbestanden
-              {savedPrintFiles.length > 0 && !newPrintFileResults && (
-                <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 400, marginLeft: 8 }}>
-                  ({savedPrintFiles.length} opgeslagen)
-                </span>
-              )}
-              {newPrintFileResults && (
-                <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 400, marginLeft: 8 }}>
-                  {newPrintFileResults.filter((r) => !r.skipped).length} gegenereerd
-                </span>
-              )}
-            </h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {savedPrintFiles.length > 0 && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 12 }}
-                  onClick={deleteAllPrintFiles}
-                  disabled={deletingPrintFiles}
-                >
-                  {deletingPrintFiles ? 'Verwijderen...' : 'Verwijder alle'}
-                </button>
-              )}
-              <button
-                className="btn btn-primary"
-                onClick={generatePrintFiles}
-                disabled={generatingPrintFiles || !design.driveFileId}
-                title={!design.driveFileId ? 'Upload eerst een designbestand' : undefined}
+          </div>
+          {/* Footer */}
+          <div style={{ padding: '10px 12px' }}>
+            <p style={{ fontWeight: 600, fontSize: 12, color: '#374151', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
+            {altText && altText !== name && (
+              <p style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{altText}</p>
+            )}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <a
+                href={viewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                style={{ fontSize: 11, padding: '3px 8px', textDecoration: 'none', flex: 1, textAlign: 'center' }}
               >
-                {generatingPrintFiles
-                  ? 'Genereren... (Illustrator actief)'
-                  : savedPrintFiles.length > 0
-                  ? 'Opnieuw genereren'
-                  : 'Genereer printbestanden'}
+                ↗ Drive
+              </a>
+              <button
+                onClick={onRegenerate}
+                disabled={!canRegenerate || isRegenerating}
+                className="btn btn-secondary"
+                style={{ fontSize: 11, padding: '3px 8px' }}
+                title="Opnieuw genereren"
+              >
+                {isRegenerating ? '...' : '↺'}
               </button>
             </div>
           </div>
-
-          {generatingPrintFiles && (
-            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#1d4ed8' }}>
-              Adobe Illustrator is bezig met het genereren van printbestanden. Dit kan enkele minuten duren per formaat...
-            </div>
-          )}
-
-          {/* Display generated or saved print files */}
-          {(() => {
-            const displayFiles = newPrintFileResults ?? savedPrintFiles
-            if (displayFiles.length === 0 && !generatingPrintFiles) {
-              return (
-                <p style={{ color: '#9ca3af', fontSize: 13 }}>
-                  Nog geen printbestanden gegenereerd. Klik op "Genereer printbestanden" om te starten.
-                </p>
-              )
-            }
-
-            return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {displayFiles.map((file) => {
-                  const isResult = 'skipped' in file
-                  const sizeKey  = file.sizeKey
-                  const fileName = file.fileName
-                  const driveUrl = file.driveUrl
-                  const skipped  = isResult ? (file as PrintFileResult).skipped : false
-                  const skipReason = isResult ? (file as PrintFileResult).skipReason : undefined
-                  const isRegenerating = regeneratingPrintFile === sizeKey
-
-                  return (
-                    <div
-                      key={sizeKey || fileName}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: '8px 12px',
-                        border: `1px solid ${skipped ? '#fecaca' : '#e5e7eb'}`,
-                        borderRadius: 6,
-                        background: skipped ? '#fef2f2' : '#fafafa',
-                      }}
-                    >
-                      {/* PDF icon */}
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 4,
-                        background: skipped ? '#fecaca' : '#fee2e2',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0,
-                      }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: skipped ? '#991b1b' : '#dc2626' }}>PDF</span>
-                      </div>
-
-                      {/* File info */}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: skipped ? '#991b1b' : '#111827' }}>
-                          {fileName || `ib-${design.designCode.toLowerCase()}-${sizeKey?.replace('x', '-')}.pdf`}
-                        </div>
-                        {skipped ? (
-                          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{skipReason}</div>
-                        ) : (
-                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
-                            {file.widthMM}×{file.heightMM} mm — {sizeKey}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                        {!skipped && driveUrl && (
-                          <a
-                            href={driveUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-secondary"
-                            style={{ fontSize: 11, padding: '4px 10px', textDecoration: 'none' }}
-                          >
-                            Openen in Drive
-                          </a>
-                        )}
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: 11, padding: '4px 10px' }}
-                          onClick={() => regeneratePrintFile(sizeKey)}
-                          disabled={isRegenerating || generatingPrintFiles}
-                        >
-                          {isRegenerating ? '...' : 'Opnieuw'}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })()}
-        </div>
+        </>
       )}
-
-      {/* Content cards — NL, DE, EN */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, marginBottom: 30 }}>
-
-        {/* NL Content */}
-        {(() => {
-          const lang = 'nl'
-          const c = nlContent
-          const editing = contentEditMode[lang]
-          const vals = contentEditValues[lang]
-          const isSaving = contentSaving[lang]
-          return (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h2 style={{ margin: 0 }}>Content — Nederlands</h2>
-                {c && !editing && (
-                  <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={() => openContentEdit(lang, c)}>
-                    Bewerken
-                  </button>
-                )}
-              </div>
-              {c ? (
-                editing && vals ? (
-                  <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Alt Text</label>
-                      <input value={vals.altText} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], altText: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Title</label>
-                      <input value={vals.seoTitle} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoTitle: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Description</label>
-                      <textarea rows={2} value={vals.seoDescription} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoDescription: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Beschrijving</label>
-                      <textarea rows={6} value={vals.description} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], description: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-primary btn-sm" onClick={() => saveContentEdit(lang)} disabled={isSaving}>{isSaving ? 'Opslaan...' : 'Opslaan'}</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => cancelContentEdit(lang)} disabled={isSaving}>Annuleren</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13 }}>
-                    <p><strong>Alt Text:</strong> {c.altText}</p>
-                    <p style={{ marginTop: 8 }}><strong>SEO Title:</strong> {c.seoTitle}</p>
-                    <p style={{ marginTop: 4 }}><strong>SEO Description:</strong> {c.seoDescription}</p>
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{ cursor: 'pointer', color: '#2563eb' }}>Beschrijving</summary>
-                      <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12 }}>{c.description}</p>
-                    </details>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => generateContent(getProductType(design))} disabled={generating}>
-                        {generating ? 'Genereren...' : 'Opnieuw genereren'}
-                      </button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => translateContent('de')} disabled={translating === 'de'}>
-                        {translating === 'de' ? 'Vertalen...' : deContent ? 'DE opnieuw' : 'Vertalen → DE'}
-                      </button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => translateContent('en')} disabled={translating === 'en'}>
-                        {translating === 'en' ? 'Vertalen...' : enContent ? 'EN opnieuw' : 'Vertalen → EN'}
-                      </button>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div>
-                  <p style={{ color: '#666', marginBottom: 12 }}>Nog geen Nederlandse content.</p>
-                  <button className="btn btn-primary btn-sm" onClick={() => generateContent(getProductType(design))} disabled={generating}>
-                    {generating ? 'Genereren...' : 'NL Content genereren (AI)'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )
-        })()}
-
-        {/* DE Content */}
-        {(() => {
-          const lang = 'de'
-          const c = deContent
-          const editing = contentEditMode[lang]
-          const vals = contentEditValues[lang]
-          const isSaving = contentSaving[lang]
-          return (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h2 style={{ margin: 0 }}>Content — Deutsch</h2>
-                {c && !editing && (
-                  <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={() => openContentEdit(lang, c)}>
-                    Bearbeiten
-                  </button>
-                )}
-              </div>
-              {c ? (
-                editing && vals ? (
-                  <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Alt Text</label>
-                      <input value={vals.altText} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], altText: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Title</label>
-                      <input value={vals.seoTitle} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoTitle: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Description</label>
-                      <textarea rows={2} value={vals.seoDescription} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoDescription: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Beschreibung</label>
-                      <textarea rows={6} value={vals.description} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], description: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-primary btn-sm" onClick={() => saveContentEdit(lang)} disabled={isSaving}>{isSaving ? 'Speichern...' : 'Opslaan'}</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => cancelContentEdit(lang)} disabled={isSaving}>Annuleren</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13 }}>
-                    <p><strong>Alt Text:</strong> {c.altText}</p>
-                    <p style={{ marginTop: 8 }}><strong>SEO Title:</strong> {c.seoTitle}</p>
-                    <p style={{ marginTop: 4 }}><strong>SEO Description:</strong> {c.seoDescription}</p>
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{ cursor: 'pointer', color: '#2563eb' }}>Beschreibung</summary>
-                      <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12 }}>{c.description}</p>
-                    </details>
-                    <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>Status: {c.translationStatus}</p>
-                    <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => translateContent('de')} disabled={translating === 'de'}>
-                      {translating === 'de' ? 'Vertalen...' : 'Opnieuw vertalen'}
-                    </button>
-                  </div>
-                )
-              ) : (
-                <div>
-                  <p style={{ color: '#666', marginBottom: 12 }}>
-                    {nlContent ? 'Nog niet vertaald.' : 'Genereer eerst NL content.'}
-                  </p>
-                  {nlContent && (
-                    <button className="btn btn-secondary btn-sm" onClick={() => translateContent('de')} disabled={translating === 'de'}>
-                      {translating === 'de' ? 'Vertalen...' : 'Vertalen naar DE'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })()}
-
-        {/* EN Content */}
-        {(() => {
-          const lang = 'en'
-          const c = enContent
-          const editing = contentEditMode[lang]
-          const vals = contentEditValues[lang]
-          const isSaving = contentSaving[lang]
-          return (
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h2 style={{ margin: 0 }}>Content — English</h2>
-                {c && !editing && (
-                  <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={() => openContentEdit(lang, c)}>
-                    Edit
-                  </button>
-                )}
-              </div>
-              {c ? (
-                editing && vals ? (
-                  <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Alt Text</label>
-                      <input value={vals.altText} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], altText: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Title</label>
-                      <input value={vals.seoTitle} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoTitle: e.target.value } }))} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>SEO Description</label>
-                      <textarea rows={2} value={vals.seoDescription} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], seoDescription: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label style={{ fontSize: 11 }}>Description</label>
-                      <textarea rows={6} value={vals.description} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], description: e.target.value } }))} style={{ resize: 'vertical' }} />
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-primary btn-sm" onClick={() => saveContentEdit(lang)} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save'}</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => cancelContentEdit(lang)} disabled={isSaving}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13 }}>
-                    <p><strong>Alt Text:</strong> {c.altText}</p>
-                    <p style={{ marginTop: 8 }}><strong>SEO Title:</strong> {c.seoTitle}</p>
-                    <p style={{ marginTop: 4 }}><strong>SEO Description:</strong> {c.seoDescription}</p>
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{ cursor: 'pointer', color: '#2563eb' }}>Description</summary>
-                      <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12 }}>{c.description}</p>
-                    </details>
-                    <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>Status: {c.translationStatus}</p>
-                    <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => translateContent('en')} disabled={translating === 'en'}>
-                      {translating === 'en' ? 'Translating...' : 'Re-translate'}
-                    </button>
-                  </div>
-                )
-              ) : (
-                <div>
-                  <p style={{ color: '#666', marginBottom: 12 }}>
-                    {nlContent ? 'Not yet translated.' : 'Generate NL content first.'}
-                  </p>
-                  {nlContent && (
-                    <button className="btn btn-secondary btn-sm" onClick={() => translateContent('en')} disabled={translating === 'en'}>
-                      {translating === 'en' ? 'Translating...' : 'Translate → EN'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })()}
-      </div>
-
-      {/* Variants */}
-      <div className="card" style={{ marginBottom: 30 }}>
-        <h2>Varianten ({design.variants.length})</h2>
-        {design.variants.length > 0 ? (
-          <div style={{ maxHeight: 350, overflow: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>Type</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>Maat (mm)</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>Materiaal</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>SKU</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>EAN</th>
-                  <th style={{ textAlign: 'right', padding: '8px 12px' }}>Prijs</th>
-                  <th style={{ textAlign: 'right', padding: '8px 12px' }}>Gewicht (g)</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px' }}>Shopify ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                {design.variants.map((v) => (
-                  <tr key={v.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                    <td style={{ padding: '6px 12px' }}>{v.productType}</td>
-                    <td style={{ padding: '6px 12px' }}>{v.size}</td>
-                    <td style={{ padding: '6px 12px' }}>{v.material ?? '—'}</td>
-                    <td style={{ padding: '6px 12px', fontFamily: 'monospace' }}>{v.sku}</td>
-                    <td style={{ padding: '6px 12px' }}>{v.ean || '—'}</td>
-                    <td style={{ padding: '6px 12px', textAlign: 'right' }}>
-                      {v.price != null ? `€${v.price.toFixed(2)}` : '—'}
-                    </td>
-                    <td style={{ padding: '6px 12px', textAlign: 'right' }}>
-                      {v.weight != null ? Math.round(v.weight * 1000) : '—'}
-                    </td>
-                    <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontSize: 11, color: '#6b7280' }}>
-                      {v.shopifyProductId || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p style={{ color: '#666' }}>Nog geen varianten aangemaakt.</p>
-        )}
-      </div>
     </div>
   )
 }
