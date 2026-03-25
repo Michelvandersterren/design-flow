@@ -19,6 +19,7 @@ interface Content {
   id: string
   language: string
   description: string | null
+  longDescription: string | null
   altText: string | null
   seoTitle: string | null
   seoDescription: string | null
@@ -255,7 +256,7 @@ export default function DesignDetail() {
   } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  type ContentEditFields = { description: string; altText: string; seoTitle: string; seoDescription: string }
+  type ContentEditFields = { description: string; longDescription: string; altText: string; seoTitle: string; seoDescription: string }
   const [contentEditMode, setContentEditMode] = useState<Record<string, boolean>>({})
   const [contentEditValues, setContentEditValues] = useState<Record<string, ContentEditFields>>({})
   const [contentSaving, setContentSaving] = useState<Record<string, boolean>>({})
@@ -507,7 +508,7 @@ export default function DesignDetail() {
   const openContentEdit = (lang: string, c: Content) => {
     setContentEditValues((prev) => ({
       ...prev,
-      [lang]: { description: c.description ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '' },
+      [lang]: { description: c.description ?? '', longDescription: c.longDescription ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '' },
     }))
     setContentEditMode((prev) => ({ ...prev, [lang]: true }))
   }
@@ -1268,13 +1269,14 @@ export default function DesignDetail() {
                           { field: 'altText' as const, label: 'Alt Text', type: 'input' },
                           { field: 'seoTitle' as const, label: 'SEO Title', type: 'input' },
                           { field: 'seoDescription' as const, label: 'SEO Description', type: 'textarea2' },
-                          { field: 'description' as const, label: 'Beschrijving', type: 'textarea6' },
+                          { field: 'description' as const, label: 'Korte beschrijving', type: 'textarea3' },
+                          { field: 'longDescription' as const, label: 'Lange beschrijving', type: 'textarea6' },
                         ].map(({ field, label, type }) => (
                           <div className="form-group" style={{ margin: 0 }} key={field}>
                             <label style={{ fontSize: 11 }}>{label}</label>
                             {type === 'input'
                               ? <input value={vals[field]} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], [field]: e.target.value } }))} />
-                              : <textarea rows={type === 'textarea6' ? 6 : 2} value={vals[field]} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], [field]: e.target.value } }))} style={{ resize: 'vertical' }} />
+                              : <textarea rows={type === 'textarea6' ? 6 : type === 'textarea3' ? 3 : 2} value={vals[field]} onChange={(e) => setContentEditValues((p) => ({ ...p, [lang]: { ...p[lang], [field]: e.target.value } }))} style={{ resize: 'vertical' }} />
                             }
                           </div>
                         ))}
@@ -1291,9 +1293,15 @@ export default function DesignDetail() {
                           <ContentField label="SEO Description" value={c.seoDescription} />
                         </div>
                         <details style={{ marginTop: 12 }}>
-                          <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: 12 }}>Beschrijving tonen</summary>
+                          <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: 12 }}>Korte beschrijving tonen</summary>
                           <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{c.description}</p>
                         </details>
+                        {c.longDescription && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: 12 }}>Lange beschrijving tonen</summary>
+                            <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', fontSize: 12, color: '#374151', lineHeight: 1.6 }}>{c.longDescription}</p>
+                          </details>
+                        )}
                         {c.translationStatus && lang !== 'nl' && (
                           <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Status: {c.translationStatus}</p>
                         )}

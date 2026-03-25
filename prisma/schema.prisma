@@ -63,6 +63,7 @@ model Content {
   designId          String
   language          String
   description       String?
+  longDescription   String?
   altText           String?
   seoTitle          String?
   seoDescription    String?

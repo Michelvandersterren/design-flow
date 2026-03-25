@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
         where: { id: existingContent.id },
         data: {
           description: content.description,
+          longDescription: content.longDescription,
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
           designId,
           language: 'nl',
           description: content.description,
+          longDescription: content.longDescription,
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,

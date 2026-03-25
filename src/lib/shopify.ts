@@ -156,6 +156,16 @@ export async function buildShopifyProduct(designId: string) {
           value: design.designCode,
           type: 'single_line_text_field',
         },
+        ...(nlContent.longDescription
+          ? [
+              {
+                namespace: 'custom',
+                key: 'long_description',
+                value: toBodyHtml(nlContent.longDescription),
+                type: 'multi_line_text_field',
+              },
+            ]
+          : []),
       ],
     },
   }

@@ -8,6 +8,7 @@ const anthropic = new Anthropic({
 
 export interface GeneratedContent {
   description: string
+  longDescription: string
   altText: string
   seoTitle: string
   seoDescription: string
@@ -128,12 +129,13 @@ INSTRUCTIES:
 Schrijf in het Nederlands, passend bij de KitchenArt brand voice hierboven.
 ${driveFileId ? 'Beschrijf het design visueel accuraat op basis van de afbeelding. Noem specifieke patronen, kleuren en sfeer die je ziet.' : ''}
 
-1. Productbeschrijving: 2-3 paragrafen, marketinggericht, sfeergevend. Verwerk het design en product type natuurlijk.
-2. Alt-tekst: SEO-vriendelijk en beschrijvend voor de productafbeelding (max 125 tekens).
-3. SEO titel: max 60 tekens, bevat design naam + product type + KitchenArt.
-4. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
+1. Korte beschrijving (description): 1-2 zinnen, wervend en sfeergevend — verschijnt bovenaan de productpagina bij de koop-knop.
+2. Lange beschrijving (longDescription): 2-3 paragrafen, meer uitgebreid — verschijnt verder op de pagina. Verwerk materiaal, gebruik, design inspiratie en gevoel. Verwerk het product type natuurlijk.
+3. Alt-tekst: SEO-vriendelijk en beschrijvend voor de productafbeelding (max 125 tekens).
+4. SEO titel: max 60 tekens, bevat design naam + product type + KitchenArt.
+5. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
 
-Geef het resultaat als JSON met keys: description, altText, seoTitle, seoDescription`
+Geef het resultaat als JSON met keys: description, longDescription, altText, seoTitle, seoDescription`
 
   try {
     // Try to load image from Drive if fileId is provided
@@ -181,6 +183,7 @@ Geef het resultaat als JSON met keys: description, altText, seoTitle, seoDescrip
       const parsed = JSON.parse(jsonMatch[0])
       return {
         description: parsed.description || '',
+        longDescription: parsed.longDescription || '',
         altText: parsed.altText || '',
         seoTitle: parsed.seoTitle || '',
         seoDescription: parsed.seoDescription || '',
@@ -189,6 +192,7 @@ Geef het resultaat als JSON met keys: description, altText, seoTitle, seoDescrip
 
     return {
       description: text,
+      longDescription: '',
       altText: `${designName} - ${productName} | KitchenArt`,
       seoTitle: `${designName} | Premium ${productName} | KitchenArt`,
       seoDescription: `Bestel nu de ${designName} ${productName} bij KitchenArt. Stijlvol design voor een unieke keuken.`,

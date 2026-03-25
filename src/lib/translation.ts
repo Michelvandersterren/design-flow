@@ -12,10 +12,18 @@ const LANGUAGE_NAMES: Record<string, string> = {
   fr: 'French',
 }
 
+type TranslationFields = {
+  description: string | null
+  longDescription: string | null
+  altText: string | null
+  seoTitle: string | null
+  seoDescription: string | null
+}
+
 async function translateWithClaude(
-  texts: { description: string | null; altText: string | null; seoTitle: string | null; seoDescription: string | null },
+  texts: TranslationFields,
   targetLanguage: 'de' | 'en' | 'fr'
-): Promise<{ description: string | null; altText: string | null; seoTitle: string | null; seoDescription: string | null }> {
+): Promise<TranslationFields> {
   const langName = LANGUAGE_NAMES[targetLanguage]
 
   const prompt = `You are a professional translator for a Dutch kitchen accessories webshop called KitchenArt. 
@@ -29,7 +37,7 @@ ${JSON.stringify(texts, null, 2)}`
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 2048,
+    max_tokens: 3000,
     messages: [
       {
         role: 'user',
@@ -63,6 +71,7 @@ ${JSON.stringify(texts, null, 2)}`
     }
     parsed = {
       description: extractField('description'),
+      longDescription: extractField('longDescription'),
       altText: extractField('altText'),
       seoTitle: extractField('seoTitle'),
       seoDescription: extractField('seoDescription'),
@@ -71,6 +80,7 @@ ${JSON.stringify(texts, null, 2)}`
 
   return {
     description: parsed.description ?? texts.description,
+    longDescription: parsed.longDescription ?? texts.longDescription,
     altText: parsed.altText ?? texts.altText,
     seoTitle: parsed.seoTitle ?? texts.seoTitle,
     seoDescription: parsed.seoDescription ?? texts.seoDescription,
@@ -116,6 +126,7 @@ export async function translateContent(
   }
 
   let translatedDescription = content.description
+  let translatedLongDescription = content.longDescription
   let translatedAltText = content.altText
   let translatedSeoTitle = content.seoTitle
   let translatedSeoDescription = content.seoDescription
@@ -125,19 +136,20 @@ export async function translateContent(
     try {
       const targetLangCode = targetLanguage === 'de' ? 'DE' : targetLanguage === 'fr' ? 'FR' : 'EN-GB'
       const results = await translateWithDeepL(
-        [content.description, content.altText, content.seoTitle, content.seoDescription],
+        [content.description, content.longDescription, content.altText, content.seoTitle, content.seoDescription],
         targetLangCode
       )
       translatedDescription = results[0]
-      translatedAltText = results[1]
-      translatedSeoTitle = results[2]
-      translatedSeoDescription = results[3]
+      translatedLongDescription = results[1]
+      translatedAltText = results[2]
+      translatedSeoTitle = results[3]
+      translatedSeoDescription = results[4]
     } catch (error) {
       console.error('DeepL translation failed, falling back to Claude:', error)
-      // Fall through to Claude fallback below
       const result = await translateWithClaude(
         {
           description: content.description,
+          longDescription: content.longDescription,
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
@@ -145,6 +157,7 @@ export async function translateContent(
         targetLanguage
       )
       translatedDescription = result.description
+      translatedLongDescription = result.longDescription
       translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
@@ -155,6 +168,7 @@ export async function translateContent(
       const result = await translateWithClaude(
         {
           description: content.description,
+          longDescription: content.longDescription,
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
@@ -162,6 +176,7 @@ export async function translateContent(
         targetLanguage
       )
       translatedDescription = result.description
+      translatedLongDescription = result.longDescription
       translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
@@ -186,6 +201,7 @@ export async function translateContent(
       where: { id: existingTranslation.id },
       data: {
         description: translatedDescription,
+        longDescription: translatedLongDescription,
         altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
@@ -199,6 +215,7 @@ export async function translateContent(
         designId: content.designId,
         language: targetLanguage,
         description: translatedDescription,
+        longDescription: translatedLongDescription,
         altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
@@ -210,6 +227,7 @@ export async function translateContent(
 
   return {
     description: translatedDescription,
+    longDescription: translatedLongDescription,
     altText: translatedAltText,
     seoTitle: translatedSeoTitle,
     seoDescription: translatedSeoDescription,
