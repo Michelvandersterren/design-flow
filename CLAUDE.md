@@ -86,8 +86,9 @@ design-flow/
 - `language`: nl | de | en | fr
 - `description`: korte beschrijving (1-2 zinnen) — Shopify `body_html`, verschijnt boven de koop-knop
 - `longDescription`: lange beschrijving (2-3 paragrafen) — Shopify metafield `custom.long_description`
-- `altText`, `seoTitle`, `seoDescription`
+- `seoTitle`, `seoDescription`, `googleShoppingDescription`
 - `translationStatus`
+- `altText` veld bestaat nog in DB (nullable) maar wordt niet meer gebruikt — nooit verwijderen via migratie
 
 ### DesignMockup
 - `templateId`, `outputName`, `productType`
@@ -436,3 +437,49 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 **`src/app/page.tsx`** — dashboard heeft "Stijlfamilies genereren" knop + resultaatweergave
 
 **`src/lib/notion.ts`** — `updateStyleFamilyInNotion()` bestaat al
+
+---
+
+## Session — 2026-03-25 (vervolg): Volledige Shopify metadata coverage + altText verwijderd
+
+### Changes committed (664e832): Full Shopify metadata coverage + remove Content.altText
+
+**`src/lib/shopify.ts`**
+- `PRODUCT_MATERIAL` constante toegevoegd bovenaan: `{ IB: "Vinyl texture overlay", MC: "Aluminium-Dibond matte", SP: "Aluminium-Dibond matte" }`
+- `buildShopifyProduct()`: 3 nieuwe **product metafields**:
+  - `custom.product_type` (single_line_text_field) — IB / MC / SP code
+  - `custom.material` (single_line_text_field) — statisch label per producttype
+  - `custom.induction_compatible` (single_line_text_field) — `"true"` of `"false"` string
+- `buildShopifyProduct()`: **variant metafields** per variant:
+  - `custom.width_mm` + `custom.height_mm` (IB/SP) — afmeting in mm, integer_type
+  - `custom.diameter_mm` (MC) — diameter in mm, integer_type
+  - `custom.ean` (alle types, indien aanwezig) — EAN-13 barcode, single_line_text_field
+  - `custom.material` (SP only) — label string uit `SP_MATERIALS` constante
+- `updateShopifyProduct()`: query uitgebreid met `variants: { take: 1 }`; upsert van de 3 nieuwe product metafields (`product_type`, `material`, `induction_compatible`)
+
+**`src/lib/ai.ts`**
+- `altText` verwijderd uit `GeneratedContent` interface, prompt, JSON parse-resultaat en fallback return
+
+**`src/app/api/ai/generate/route.ts`**
+- `altText` verwijderd uit `prisma.content.update` en `prisma.content.create`
+
+**`src/app/api/designs/[id]/content/route.ts`**
+- `altText` verwijderd uit destructuring en `data` object in PATCH-handler
+
+**`src/app/designs/[id]/page.tsx`**
+- `altText` verwijderd uit `Content` interface, `ContentEditFields` type, `openContentEdit` initialisatie, edit form velden en read-only `<ContentField>` weergave
+
+**`src/lib/translation.ts`**
+- `altText` verwijderd uit `TranslationFields` type, Claude regex fallback, Claude return object, DeepL array (geherindexeerd 0–4), alle variabele assignments en beide DB upsert-paden
+
+### Changes committed (eca01c9): Fix Google Shopping description length
+
+**`src/lib/ai.ts`**
+- Google Shopping description instructie bijgewerkt van "min 70 / max 150 tekens" naar **300–500 tekens** (conform GMC best practice)
+- Fallback waarde bijgewerkt naar een volwaardige zin van ~160 tekens
+
+### Architecture notes
+- `Content.altText` bestaat nog als nullable kolom in de DB — **nooit verwijderen via migratie**; het wordt simpelweg niet meer geschreven of gelezen
+- Shopify REST API accepteert `metafields` array direct op elk variant-object in de product creation payload
+- Variant size format: IB/SP = `"520x350"` (B×H in mm), MC = `"600"` (diameter in mm)
+- SP material labels komen uit `SP_MATERIALS` in `constants.ts`: G = Glas, BH0 = Brushed, BH4 = Brushed + 4mm
