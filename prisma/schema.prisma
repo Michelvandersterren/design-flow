@@ -27,6 +27,7 @@ model Design {
   driveFileName     String?
   content           Content[]
   mockups           DesignMockup[]
+  printFiles        DesignPrintFile[]
   variants          Variant[]
   workflowSteps     WorkflowStep[]
 
@@ -103,6 +104,24 @@ model DesignMockup {
   sizeKey     String?
   design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
+  @@index([designId])
+}
+
+// Stores every generated print PDF per design variant size
+model DesignPrintFile {
+  id          String   @id @default(cuid())
+  designId    String
+  productType String   // IB | SP | MC
+  sizeKey     String   // e.g. "520x350"
+  widthMM     Int
+  heightMM    Int
+  fileName    String   // e.g. "ib-soazb-520-350.pdf"
+  driveFileId String
+  driveUrl    String   // webViewLink — direct link to open/download in Drive
+  createdAt   DateTime @default(now())
+  design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+
+  @@unique([designId, sizeKey])
   @@index([designId])
 }
 

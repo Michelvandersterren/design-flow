@@ -91,6 +91,93 @@ export function getDriveDirectUrl(fileId: string, absolute = false): string {
   return `/api/drive-image/${fileId}`
 }
 
+/**
+ * Upload a print PDF to Google Drive.
+ *
+ * Files are stored in a dedicated "printbestand" subfolder under the main
+ * Drive folder (GOOGLE_DRIVE_FOLDER_ID). The subfolder is created on first
+ * use and reused for all subsequent uploads.
+ *
+ * Returns the Drive webViewLink (not webContentLink) so the user can open
+ * or download the PDF directly from Drive.
+ */
+export async function uploadPrintFileToDrive(
+  buffer: Buffer,
+  fileName: string,
+  designCode: string
+): Promise<DriveUploadResult> {
+  const drive = getDriveClient()
+
+  // Resolve or create "printbestand" subfolder
+  const subfolderId = await getOrCreatePrintFolder(drive)
+
+  const stream = Readable.from(buffer)
+
+  const response = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: fileName,
+      parents: [subfolderId],
+    },
+    media: {
+      mimeType: 'application/pdf',
+      body: stream,
+    },
+    fields: 'id, name, webViewLink, webContentLink',
+  })
+
+  const file = response.data
+  if (!file.id) throw new Error('Google Drive upload mislukt: geen file ID ontvangen')
+
+  // Make publicly readable so the link works without authentication
+  await drive.permissions.create({
+    fileId: file.id,
+    supportsAllDrives: true,
+    requestBody: { role: 'reader', type: 'anyone' },
+  })
+
+  return {
+    fileId: file.id,
+    fileName: file.name || fileName,
+    webViewLink: file.webViewLink || '',
+    webContentLink: file.webContentLink || '',
+  }
+}
+
+/**
+ * Returns the Drive folder ID for the "printbestand" subfolder,
+ * creating it if it doesn't exist yet.
+ */
+async function getOrCreatePrintFolder(drive: ReturnType<typeof getDriveClient>): Promise<string> {
+  const FOLDER_NAME = 'printbestand'
+
+  // Search for existing subfolder
+  const search = await drive.files.list({
+    q: `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and '${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false`,
+    fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  })
+
+  if (search.data.files && search.data.files.length > 0) {
+    return search.data.files[0].id!
+  }
+
+  // Create subfolder
+  const created = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [GOOGLE_DRIVE_FOLDER_ID],
+    },
+    fields: 'id',
+  })
+
+  if (!created.data.id) throw new Error('Kon de "printbestand" map niet aanmaken in Drive')
+  return created.data.id
+}
+
 export async function deleteDesignFromDrive(fileId: string): Promise<void> {
   const drive = getDriveClient()
   await drive.files.delete({ fileId, supportsAllDrives: true })

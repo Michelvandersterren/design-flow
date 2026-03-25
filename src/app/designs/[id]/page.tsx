@@ -76,6 +76,29 @@ interface MockupGenerateResult {
   skipReason?: string
 }
 
+interface DesignPrintFile {
+  id: string
+  productType: string
+  sizeKey: string
+  widthMM: number
+  heightMM: number
+  fileName: string
+  driveFileId: string
+  driveUrl: string   // webViewLink — open in Drive
+  createdAt: string
+}
+
+interface PrintFileResult {
+  sizeKey: string
+  widthMM: number
+  heightMM: number
+  driveFileId: string
+  driveUrl: string
+  fileName: string
+  skipped?: boolean
+  skipReason?: string
+}
+
 export default function DesignDetail() {
   const params = useParams()
   const router = useRouter()
@@ -93,6 +116,14 @@ export default function DesignDetail() {
   const [mockupProgress, setMockupProgress] = useState<{ current: number; total: number } | null>(null)
   const [newMockupResults, setNewMockupResults] = useState<MockupGenerateResult[] | null>(null)
   const [mockupStatus, setMockupStatus] = useState<{ readyCount: number; totalCount: number; templates: { id: string; file: string; ready: boolean }[] } | null>(null)
+
+  // Print file state
+  const [generatingPrintFiles, setGeneratingPrintFiles] = useState(false)
+  const [regeneratingPrintFile, setRegeneratingPrintFile] = useState<string | null>(null) // sizeKey being regenerated
+  const [deletingPrintFiles, setDeletingPrintFiles] = useState(false)
+  const [savedPrintFiles, setSavedPrintFiles] = useState<DesignPrintFile[]>([])
+  const [newPrintFileResults, setNewPrintFileResults] = useState<PrintFileResult[] | null>(null)
+
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<{
     designName: string
@@ -141,6 +172,18 @@ export default function DesignDetail() {
       fetchMockupStatus()
     }
   }, [design?.variants?.length, fetchMockupStatus])
+
+  const fetchPrintFiles = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/designs/${params.id}/printfile`)
+      const data = await res.json()
+      if (data.printFiles) setSavedPrintFiles(data.printFiles)
+    } catch {}
+  }, [params.id])
+
+  useEffect(() => {
+    if (design?.id) fetchPrintFiles()
+  }, [design?.id, fetchPrintFiles])
 
   const generateVariants = async () => {
     if (!design) return
@@ -323,6 +366,72 @@ export default function DesignDetail() {
   }
 
   const generateSizeSpecificMockups = async () => { /* legacy — not used */ }
+
+  const generatePrintFiles = async () => {
+    if (!design) return
+    setGeneratingPrintFiles(true)
+    setNewPrintFileResults(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/printfile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (data.results) {
+        setNewPrintFileResults(data.results)
+        fetchPrintFiles()
+      } else {
+        alert('Printbestand generatie mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch {
+      alert('Fout bij printbestand generatie')
+    } finally {
+      setGeneratingPrintFiles(false)
+    }
+  }
+
+  const regeneratePrintFile = async (sizeKey: string) => {
+    if (!design) return
+    setRegeneratingPrintFile(sizeKey)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/printfile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sizeKey }),
+      })
+      const data = await res.json()
+      if (data.results) {
+        fetchPrintFiles()
+      } else {
+        alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch {
+      alert('Fout bij hergenerate printbestand')
+    } finally {
+      setRegeneratingPrintFile(null)
+    }
+  }
+
+  const deleteAllPrintFiles = async () => {
+    if (!design) return
+    if (!confirm('Alle printbestanden verwijderen uit de database? Drive bestanden blijven bewaard.')) return
+    setDeletingPrintFiles(true)
+    setNewPrintFileResults(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/printfile`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.success) {
+        setSavedPrintFiles([])
+      } else {
+        alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch {
+      alert('Fout bij verwijderen printbestanden')
+    } finally {
+      setDeletingPrintFiles(false)
+    }
+  }
 
   const openEditMode = () => {
     if (!design) return
@@ -934,6 +1043,145 @@ export default function DesignDetail() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Printbestanden sectie */}
+      {design.variants.some((v) => v.productType === 'IB') && (
+        <div className="card" style={{ marginBottom: 30 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ margin: 0 }}>
+              Printbestanden
+              {savedPrintFiles.length > 0 && !newPrintFileResults && (
+                <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 400, marginLeft: 8 }}>
+                  ({savedPrintFiles.length} opgeslagen)
+                </span>
+              )}
+              {newPrintFileResults && (
+                <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 400, marginLeft: 8 }}>
+                  {newPrintFileResults.filter((r) => !r.skipped).length} gegenereerd
+                </span>
+              )}
+            </h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {savedPrintFiles.length > 0 && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={deleteAllPrintFiles}
+                  disabled={deletingPrintFiles}
+                >
+                  {deletingPrintFiles ? 'Verwijderen...' : 'Verwijder alle'}
+                </button>
+              )}
+              <button
+                className="btn btn-primary"
+                onClick={generatePrintFiles}
+                disabled={generatingPrintFiles || !design.driveFileId}
+                title={!design.driveFileId ? 'Upload eerst een designbestand' : undefined}
+              >
+                {generatingPrintFiles
+                  ? 'Genereren... (Illustrator actief)'
+                  : savedPrintFiles.length > 0
+                  ? 'Opnieuw genereren'
+                  : 'Genereer printbestanden'}
+              </button>
+            </div>
+          </div>
+
+          {generatingPrintFiles && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#1d4ed8' }}>
+              Adobe Illustrator is bezig met het genereren van printbestanden. Dit kan enkele minuten duren per formaat...
+            </div>
+          )}
+
+          {/* Display generated or saved print files */}
+          {(() => {
+            const displayFiles = newPrintFileResults ?? savedPrintFiles
+            if (displayFiles.length === 0 && !generatingPrintFiles) {
+              return (
+                <p style={{ color: '#9ca3af', fontSize: 13 }}>
+                  Nog geen printbestanden gegenereerd. Klik op "Genereer printbestanden" om te starten.
+                </p>
+              )
+            }
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {displayFiles.map((file) => {
+                  const isResult = 'skipped' in file
+                  const sizeKey  = file.sizeKey
+                  const fileName = file.fileName
+                  const driveUrl = file.driveUrl
+                  const skipped  = isResult ? (file as PrintFileResult).skipped : false
+                  const skipReason = isResult ? (file as PrintFileResult).skipReason : undefined
+                  const isRegenerating = regeneratingPrintFile === sizeKey
+
+                  return (
+                    <div
+                      key={sizeKey || fileName}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '8px 12px',
+                        border: `1px solid ${skipped ? '#fecaca' : '#e5e7eb'}`,
+                        borderRadius: 6,
+                        background: skipped ? '#fef2f2' : '#fafafa',
+                      }}
+                    >
+                      {/* PDF icon */}
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 4,
+                        background: skipped ? '#fecaca' : '#fee2e2',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: skipped ? '#991b1b' : '#dc2626' }}>PDF</span>
+                      </div>
+
+                      {/* File info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: skipped ? '#991b1b' : '#111827' }}>
+                          {fileName || `ib-${design.designCode.toLowerCase()}-${sizeKey?.replace('x', '-')}.pdf`}
+                        </div>
+                        {skipped ? (
+                          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{skipReason}</div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                            {file.widthMM}×{file.heightMM} mm — {sizeKey}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        {!skipped && driveUrl && (
+                          <a
+                            href={driveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary"
+                            style={{ fontSize: 11, padding: '4px 10px', textDecoration: 'none' }}
+                          >
+                            Openen in Drive
+                          </a>
+                        )}
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: 11, padding: '4px 10px' }}
+                          onClick={() => regeneratePrintFile(sizeKey)}
+                          disabled={isRegenerating || generatingPrintFiles}
+                        >
+                          {isRegenerating ? '...' : 'Opnieuw'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
       )}
 
