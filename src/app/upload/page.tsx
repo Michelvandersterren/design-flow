@@ -140,10 +140,12 @@ export default function UploadPage() {
       if (suggestion) {
         formData.append('collections', selectedCollections.join(','))
         formData.append('colorTags', suggestion.suggestedColors.join(','))
-        formData.append('inductionFriendly', String(suggestion.suggestedProductTypes.inductionFriendly))
-        formData.append('circleFriendly', String(suggestion.suggestedProductTypes.circleFriendly))
-        formData.append('splashFriendly', String(suggestion.suggestedProductTypes.splashFriendly))
       }
+      // Derive product type flags from the selected designType, not from the AI suggestion.
+      // The user may have overridden the AI suggestion via the dropdown.
+      formData.append('inductionFriendly', String(designType === 'IB'))
+      formData.append('circleFriendly', String(designType === 'MC'))
+      formData.append('splashFriendly', String(designType === 'SP'))
 
       const res = await fetch('/api/designs/upload', {
         method: 'POST',
