@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-
+import { IB_SIZE_KEY_ALIASES } from '@/lib/mockup-config'
 interface DesignMockup {
   id: string
   templateId: string
@@ -859,8 +859,14 @@ export default function DesignDetail() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       {design.variants.map((v) => {
                         const vSizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
+                        // For IB: resolve via alias map if no exact match exists
+                        const resolvedSizeKey = v.productType === 'IB'
+                          ? (IB_SIZE_KEY_ALIASES[vSizeKey] ?? vSizeKey)
+                          : vSizeKey
+                        const aliased = resolvedSizeKey !== vSizeKey
                         const variantMockups = sizeSpecificMockups.filter(
                           (r) => (r as DesignMockup).sizeKey === vSizeKey
+                            || (aliased && (r as DesignMockup).sizeKey === resolvedSizeKey)
                         )
                         return (
                           <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 10 }}>
@@ -869,6 +875,11 @@ export default function DesignDetail() {
                                 {v.productType} — {v.size}
                               </span>
                               <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.sku}</span>
+                              {aliased && variantMockups.length > 0 && (
+                                <span style={{ fontSize: 10, color: '#9ca3af', fontStyle: 'italic' }}>
+                                  (gebruikt {resolvedSizeKey.replace('x', '×').replace(/(\d+)x(\d+)/, (_,w,h) => `${Math.round(Number(w)/10)}×${Math.round(Number(h)/10)} cm`)} mockup)
+                                </span>
+                              )}
                             </div>
                             {variantMockups.length > 0 ? (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
