@@ -133,7 +133,7 @@ ${driveFileId ? 'Beschrijf het design visueel accuraat op basis van de afbeeldin
 2. Lange beschrijving (longDescription): 2-3 paragrafen, meer uitgebreid — verschijnt verder op de pagina. Verwerk materiaal, gebruik, design inspiratie en gevoel. Verwerk het product type natuurlijk.
 3. SEO titel: max 60 tekens, bevat design naam + product type + KitchenArt.
 4. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
-5. Google Shopping beschrijving (googleShoppingDescription): minimaal 70 en maximaal 150 tekens, feitelijk en feature-gedreven (geen emotionele taal), noem materiaal, afmetingen en gebruik — geschikt voor Google Shopping feed.
+5. Google Shopping beschrijving (googleShoppingDescription): 300–500 tekens, feitelijk en feature-gedreven (geen emotionele taal), noem materiaal, afmetingen en gebruik — geschikt voor Google Shopping feed.
 
 Geef het resultaat als JSON met keys: description, longDescription, seoTitle, seoDescription, googleShoppingDescription`
 
@@ -195,7 +195,7 @@ Geef het resultaat als JSON met keys: description, longDescription, seoTitle, se
       longDescription: '',
       seoTitle: `${designName} | Premium ${productName} | KitchenArt`,
       seoDescription: `Bestel nu de ${designName} ${productName} bij KitchenArt. Stijlvol design voor een unieke keuken.`,
-      googleShoppingDescription: `${designName} ${productName} | KitchenArt | Premium kwaliteit voor de keuken`,
+      googleShoppingDescription: `${designName} ${productName} van KitchenArt. Gemaakt van hoogwaardig materiaal, geschikt voor dagelijks gebruik in de keuken. Stijlvol design dat past bij elke keukeninrichting.`,
     }
   } catch (error) {
     console.error('Anthropic API error:', error)
