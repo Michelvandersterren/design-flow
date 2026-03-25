@@ -372,3 +372,41 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 **`CLAUDE.md`** — bijgewerkt met alle sessies van vandaag
 **`.gitignore`** — `*.tsbuildinfo` toegevoegd (auto-gegenereerd bestand)
+
+---
+
+## Session — 2026-03-25 (vervolg): Fase 2–5 — Google Shopping, Shopify update, Translations API
+
+### SEO metafields (committed: 24268d7)
+- `src/lib/shopify.ts`: `global.title_tag` + `global.description_tag` toegevoegd als metafields in `buildShopifyProduct()`
+
+### Fase 2 — Google Shopping Description (unstaged → now committed)
+- `src/lib/ai.ts`: `googleShoppingDescription` in `GeneratedContent` interface, prompt (instructie #6, max 150 chars, factual/feature-driven, Google Shopping spec), JSON parse, fallback, `max_tokens` → 2000
+- `prisma/schema.prisma`: `googleShoppingDescription String?` op `Content` model (`prisma db push` gedaan)
+- `src/app/api/ai/generate/route.ts`: `googleShoppingDescription` opgeslagen bij create + update
+- `src/lib/translation.ts`: `TranslationFields` uitgebreid, DeepL array index 5, Claude fallback + beide upsert-paden bijgewerkt
+- `src/lib/shopify.ts`: metafield `custom.google_shopping_description` (single_line_text_field) toegevoegd aan `buildShopifyProduct()`
+- `src/app/api/designs/[id]/content/route.ts`: PATCH accepteert + slaat `googleShoppingDescription` op
+- `src/app/designs/[id]/page.tsx`: `Content` interface uitgebreid, `ContentEditFields` uitgebreid, edit-form + read-only view tonen Google Shopping veld
+
+### Fase 4 — Shopify product update (unstaged → now committed)
+- `src/lib/shopify.ts`: `updateShopifyProduct()` functie — PUT body_html + upsert alle metafields via REST
+- `src/app/api/designs/[id]/shopify-update/route.ts`: NEW — `POST /api/designs/[id]/shopify-update`
+- `src/app/designs/[id]/page.tsx`: "Shopify bijwerken" knop (verschijnt alleen als `alreadyOnShopify`), `updateShopify()` handler, result feedback
+
+### Fase 5 — Translations API (unstaged → now committed)
+- `src/lib/shopify-translations.ts`: NEW — `pushTranslationsToShopify()` via Shopify GraphQL Admin API
+  - `translationsRegister` mutation voor product + metafields per locale (DE/EN/FR)
+  - Digest fetching via `translatableResource` query
+  - Metafield GIDs via `getProductMetafields()`
+- Geïntegreerd in:
+  - `src/app/api/designs/[id]/publish/route.ts` — na `createShopifyProduct()` (non-fatal)
+  - `src/app/api/workflow/bulk-publish/route.ts` — na `createShopifyProduct()` (non-fatal)
+  - `src/app/api/designs/[id]/shopify-update/route.ts` — na `updateShopifyProduct()` (non-fatal)
+
+### Architecture notes (Translations API)
+- REST `/translations` endpoint is deprecated — GraphQL `translationsRegister` is de juiste weg
+- Elke vertaalde field vereist een `translatableContentDigest` opgehaald via `translatableResource` query
+- Metafield-vertalingen hebben hun eigen GID en digest (apart van product-level velden)
+- NL is de default store-taal → geen translation push voor NL nodig
+- Alle translation errors zijn non-fatal (gelogd, product-publish slaagt altijd)

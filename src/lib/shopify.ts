@@ -186,6 +186,16 @@ export async function buildShopifyProduct(designId: string) {
               },
             ]
           : []),
+        ...(nlContent.googleShoppingDescription
+          ? [
+              {
+                namespace: 'custom',
+                key: 'google_shopping_description',
+                value: nlContent.googleShoppingDescription,
+                type: 'single_line_text_field',
+              },
+            ]
+          : []),
       ],
     },
   }
@@ -249,6 +259,91 @@ export async function createShopifyProduct(designId: string) {
     shopifyProductHandle: shopifyProduct.handle,
     variantsCreated: shopifyProduct.variants.length,
   }
+}
+
+/**
+ * Update an existing Shopify product's content fields and metafields.
+ * Used when content is regenerated or edited after the product was already published.
+ *
+ * Updates:
+ *  - body_html (short description)
+ *  - metafields: long_description, global.title_tag, global.description_tag, google_shopping_description
+ */
+export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
+  const design = await prisma.design.findUnique({
+    where: { id: designId },
+    include: { content: true },
+  })
+
+  if (!design) throw new Error(`Design not found: ${designId}`)
+
+  const nlContent = design.content.find((c) => c.language === 'nl')
+  if (!nlContent) throw new Error('Dutch content required')
+
+  // Convert plain-text description to HTML paragraphs for Shopify
+  const toBodyHtml = (text: string | null): string => {
+    if (!text) return ''
+    return text
+      .split(/\n{2,}/)
+      .map((para) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+      .join('\n')
+  }
+
+  // 1. Update body_html on the product itself
+  await shopifyFetch(`/products/${shopifyProductId}.json`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      product: {
+        id: shopifyProductId,
+        body_html: toBodyHtml(nlContent.description),
+      },
+    }),
+  })
+
+  // 2. Fetch existing metafields so we can PUT (update) instead of POST (create)
+  const metafieldsData = await shopifyFetch(`/products/${shopifyProductId}/metafields.json`)
+  const existingMetafields: { id: number; namespace: string; key: string }[] =
+    metafieldsData.metafields ?? []
+
+  const findMetafieldId = (namespace: string, key: string): number | undefined =>
+    existingMetafields.find((m) => m.namespace === namespace && m.key === key)?.id
+
+  // Helper: upsert a single metafield
+  const upsertMetafield = async (
+    namespace: string,
+    key: string,
+    value: string,
+    type: string
+  ) => {
+    const existingId = findMetafieldId(namespace, key)
+    if (existingId) {
+      await shopifyFetch(`/metafields/${existingId}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({ metafield: { id: existingId, value, type } }),
+      })
+    } else {
+      await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
+        method: 'POST',
+        body: JSON.stringify({ metafield: { namespace, key, value, type } }),
+      })
+    }
+  }
+
+  // 3. Upsert all content metafields
+  if (nlContent.longDescription) {
+    await upsertMetafield('custom', 'long_description', toBodyHtml(nlContent.longDescription), 'multi_line_text_field')
+  }
+  if (nlContent.seoTitle) {
+    await upsertMetafield('global', 'title_tag', nlContent.seoTitle, 'single_line_text_field')
+  }
+  if (nlContent.seoDescription) {
+    await upsertMetafield('global', 'description_tag', nlContent.seoDescription, 'single_line_text_field')
+  }
+  if (nlContent.googleShoppingDescription) {
+    await upsertMetafield('custom', 'google_shopping_description', nlContent.googleShoppingDescription, 'single_line_text_field')
+  }
+
+  return { shopifyProductId, updated: true }
 }
 
 /**

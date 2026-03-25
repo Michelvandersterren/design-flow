@@ -23,6 +23,7 @@ interface Content {
   altText: string | null
   seoTitle: string | null
   seoDescription: string | null
+  googleShoppingDescription: string | null
   translationStatus: string
 }
 
@@ -223,6 +224,8 @@ export default function DesignDetail() {
   const [translating, setTranslating] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState<{ shopifyProductId?: string; handle?: string; error?: string } | null>(null)
+  const [updatingShopify, setUpdatingShopify] = useState(false)
+  const [updateShopifyResult, setUpdateShopifyResult] = useState<{ success?: boolean; error?: string } | null>(null)
   const [forking, setForking] = useState(false)
   const shopifyConfigured = process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'
 
@@ -256,7 +259,7 @@ export default function DesignDetail() {
   } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  type ContentEditFields = { description: string; longDescription: string; altText: string; seoTitle: string; seoDescription: string }
+  type ContentEditFields = { description: string; longDescription: string; altText: string; seoTitle: string; seoDescription: string; googleShoppingDescription: string }
   const [contentEditMode, setContentEditMode] = useState<Record<string, boolean>>({})
   const [contentEditValues, setContentEditValues] = useState<Record<string, ContentEditFields>>({})
   const [contentSaving, setContentSaving] = useState<Record<string, boolean>>({})
@@ -373,6 +376,21 @@ export default function DesignDetail() {
       } else setPublishResult({ error: data.error || 'Publish mislukt' })
     } catch { setPublishResult({ error: 'Netwerkfout tijdens publiceren' }) }
     finally { setPublishing(false) }
+  }
+
+  const updateShopify = async () => {
+    if (!design) return
+    setUpdatingShopify(true)
+    setUpdateShopifyResult(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/shopify-update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (data.success) setUpdateShopifyResult({ success: true })
+      else setUpdateShopifyResult({ error: data.error || 'Update mislukt' })
+    } catch { setUpdateShopifyResult({ error: 'Netwerkfout tijdens update' }) }
+    finally { setUpdatingShopify(false) }
   }
 
   const generateMockups = async () => {
@@ -508,7 +526,7 @@ export default function DesignDetail() {
   const openContentEdit = (lang: string, c: Content) => {
     setContentEditValues((prev) => ({
       ...prev,
-      [lang]: { description: c.description ?? '', longDescription: c.longDescription ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '' },
+      [lang]: { description: c.description ?? '', longDescription: c.longDescription ?? '', altText: c.altText ?? '', seoTitle: c.seoTitle ?? '', seoDescription: c.seoDescription ?? '', googleShoppingDescription: c.googleShoppingDescription ?? '' },
     }))
     setContentEditMode((prev) => ({ ...prev, [lang]: true }))
   }
@@ -921,7 +939,17 @@ export default function DesignDetail() {
                       : undefined
                     }
                   >
-                    {alreadyOnShopify ? null : (
+                    {alreadyOnShopify ? (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '5px 12px' }}
+                        onClick={updateShopify}
+                        disabled={updatingShopify || !shopifyConfigured}
+                        title="Vernieuw content en vertalingen op Shopify"
+                      >
+                        {updatingShopify ? 'Bijwerken...' : 'Shopify bijwerken'}
+                      </button>
+                    ) : (
                       <button
                         className="btn btn-primary"
                         style={{ fontSize: 12, padding: '5px 12px', background: canPublish ? '#7c3aed' : undefined }}
@@ -932,6 +960,15 @@ export default function DesignDetail() {
                       </button>
                     )}
                   </ActionRow>
+                  {updateShopifyResult && (
+                    <div style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, marginTop: -8,
+                      background: updateShopifyResult.error ? '#fef2f2' : '#f0fdf4',
+                      color: updateShopifyResult.error ? '#dc2626' : '#16a34a',
+                      border: `1px solid ${updateShopifyResult.error ? '#fca5a5' : '#86efac'}`,
+                    }}>
+                      {updateShopifyResult.error ? `Update mislukt: ${updateShopifyResult.error}` : 'Shopify bijgewerkt!'}
+                    </div>
+                  )}
 
                   {/* Fork naar ander producttype */}
                   {(() => {
@@ -1269,6 +1306,7 @@ export default function DesignDetail() {
                           { field: 'altText' as const, label: 'Alt Text', type: 'input' },
                           { field: 'seoTitle' as const, label: 'SEO Title', type: 'input' },
                           { field: 'seoDescription' as const, label: 'SEO Description', type: 'textarea2' },
+                          { field: 'googleShoppingDescription' as const, label: 'Google Shopping', type: 'input' },
                           { field: 'description' as const, label: 'Korte beschrijving', type: 'textarea3' },
                           { field: 'longDescription' as const, label: 'Lange beschrijving', type: 'textarea6' },
                         ].map(({ field, label, type }) => (
@@ -1291,6 +1329,7 @@ export default function DesignDetail() {
                           <ContentField label="Alt Text" value={c.altText} />
                           <ContentField label="SEO Title" value={c.seoTitle} />
                           <ContentField label="SEO Description" value={c.seoDescription} />
+                          <ContentField label="Google Shopping" value={c.googleShoppingDescription} />
                         </div>
                         <details style={{ marginTop: 12 }}>
                           <summary style={{ cursor: 'pointer', color: '#2563eb', fontSize: 12 }}>Korte beschrijving tonen</summary>

@@ -18,6 +18,7 @@ type TranslationFields = {
   altText: string | null
   seoTitle: string | null
   seoDescription: string | null
+  googleShoppingDescription: string | null
 }
 
 async function translateWithClaude(
@@ -75,6 +76,7 @@ ${JSON.stringify(texts, null, 2)}`
       altText: extractField('altText'),
       seoTitle: extractField('seoTitle'),
       seoDescription: extractField('seoDescription'),
+      googleShoppingDescription: extractField('googleShoppingDescription'),
     }
   }
 
@@ -84,6 +86,7 @@ ${JSON.stringify(texts, null, 2)}`
     altText: parsed.altText ?? texts.altText,
     seoTitle: parsed.seoTitle ?? texts.seoTitle,
     seoDescription: parsed.seoDescription ?? texts.seoDescription,
+    googleShoppingDescription: parsed.googleShoppingDescription ?? texts.googleShoppingDescription,
   }
 }
 
@@ -130,13 +133,21 @@ export async function translateContent(
   let translatedAltText = content.altText
   let translatedSeoTitle = content.seoTitle
   let translatedSeoDescription = content.seoDescription
+  let translatedGoogleShoppingDescription = content.googleShoppingDescription
 
   if (DEEPL_API_KEY) {
     // Use DeepL when key is available
     try {
       const targetLangCode = targetLanguage === 'de' ? 'DE' : targetLanguage === 'fr' ? 'FR' : 'EN-GB'
       const results = await translateWithDeepL(
-        [content.description, content.longDescription, content.altText, content.seoTitle, content.seoDescription],
+        [
+          content.description,
+          content.longDescription,
+          content.altText,
+          content.seoTitle,
+          content.seoDescription,
+          content.googleShoppingDescription,
+        ],
         targetLangCode
       )
       translatedDescription = results[0]
@@ -144,6 +155,7 @@ export async function translateContent(
       translatedAltText = results[2]
       translatedSeoTitle = results[3]
       translatedSeoDescription = results[4]
+      translatedGoogleShoppingDescription = results[5]
     } catch (error) {
       console.error('DeepL translation failed, falling back to Claude:', error)
       const result = await translateWithClaude(
@@ -153,6 +165,7 @@ export async function translateContent(
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
+          googleShoppingDescription: content.googleShoppingDescription,
         },
         targetLanguage
       )
@@ -161,6 +174,7 @@ export async function translateContent(
       translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
+      translatedGoogleShoppingDescription = result.googleShoppingDescription
     }
   } else {
     // Use Claude as primary translation engine
@@ -172,6 +186,7 @@ export async function translateContent(
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
+          googleShoppingDescription: content.googleShoppingDescription,
         },
         targetLanguage
       )
@@ -180,6 +195,7 @@ export async function translateContent(
       translatedAltText = result.altText
       translatedSeoTitle = result.seoTitle
       translatedSeoDescription = result.seoDescription
+      translatedGoogleShoppingDescription = result.googleShoppingDescription
     } catch (error) {
       console.error('Claude translation error:', error)
       throw error
@@ -205,6 +221,7 @@ export async function translateContent(
         altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
+        googleShoppingDescription: translatedGoogleShoppingDescription,
         translatedFrom: 'nl',
         translationStatus: 'COMPLETED',
       },
@@ -219,6 +236,7 @@ export async function translateContent(
         altText: translatedAltText,
         seoTitle: translatedSeoTitle,
         seoDescription: translatedSeoDescription,
+        googleShoppingDescription: translatedGoogleShoppingDescription,
         translatedFrom: 'nl',
         translationStatus: 'COMPLETED',
       },
@@ -231,5 +249,6 @@ export async function translateContent(
     altText: translatedAltText,
     seoTitle: translatedSeoTitle,
     seoDescription: translatedSeoDescription,
+    googleShoppingDescription: translatedGoogleShoppingDescription,
   }
 }

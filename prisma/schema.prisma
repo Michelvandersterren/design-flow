@@ -59,19 +59,20 @@ model Variant {
 }
 
 model Content {
-  id                String   @id @default(cuid())
-  designId          String
-  language          String
-  description       String?
-  longDescription   String?
-  altText           String?
-  seoTitle          String?
-  seoDescription    String?
-  translatedFrom    String?
-  translationStatus String   @default("PENDING")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  design            Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
+  id                        String   @id @default(cuid())
+  designId                  String
+  language                  String
+  description               String?
+  longDescription           String?
+  altText                   String?
+  seoTitle                  String?
+  seoDescription            String?
+  googleShoppingDescription String?
+  translatedFrom            String?
+  translationStatus         String   @default("PENDING")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  design                    Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
   @@unique([designId, language])
   @@index([designId])

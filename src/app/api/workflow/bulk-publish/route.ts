@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createShopifyProduct, isShopifyConfigured } from '@/lib/shopify'
+import { pushTranslationsToShopify } from '@/lib/shopify-translations'
 import { markDesignLiveInNotion } from '@/lib/notion'
 
 export const maxDuration = 300 // 5 minutes for bulk operations
@@ -85,6 +86,19 @@ export async function POST(request: NextRequest) {
 
     try {
       const result = await createShopifyProduct(design.id)
+
+      // Push translations (DE/EN/FR) — non-fatal
+      try {
+        const translatedContent = await prisma.content.findMany({
+          where: { designId: design.id, language: { in: ['de', 'en', 'fr'] } },
+          select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
+        })
+        if (translatedContent.length > 0) {
+          await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
+        }
+      } catch (translationError) {
+        console.error(`Translation push failed for ${design.designCode} (non-fatal):`, translationError)
+      }
 
       // Set design status to LIVE
       const updated = await prisma.design.update({

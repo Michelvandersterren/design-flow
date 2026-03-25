@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
+          googleShoppingDescription: content.googleShoppingDescription,
           translationStatus: 'PENDING',
         }
       })
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
           altText: content.altText,
           seoTitle: content.seoTitle,
           seoDescription: content.seoDescription,
+          googleShoppingDescription: content.googleShoppingDescription,
           translationStatus: 'PENDING',
         }
       })

@@ -14,7 +14,7 @@ export async function PATCH(
   try {
     const { id: designId } = await params
     const body = await request.json()
-    const { language, description, longDescription, altText, seoTitle, seoDescription } = body
+    const { language, description, longDescription, altText, seoTitle, seoDescription, googleShoppingDescription } = body
 
     if (!language || !['nl', 'de', 'en'].includes(language)) {
       return NextResponse.json({ error: 'Ongeldige taal — gebruik nl, de of en' }, { status: 400 })
@@ -27,6 +27,7 @@ export async function PATCH(
     if (altText !== undefined) data.altText = altText
     if (seoTitle !== undefined) data.seoTitle = seoTitle
     if (seoDescription !== undefined) data.seoDescription = seoDescription
+    if (googleShoppingDescription !== undefined) data.googleShoppingDescription = googleShoppingDescription
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: 'Geen velden om bij te werken' }, { status: 400 })
