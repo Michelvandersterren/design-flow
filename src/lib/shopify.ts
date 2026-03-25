@@ -131,9 +131,10 @@ export async function buildShopifyProduct(designId: string) {
     : [{ name: 'Formaten' }]
 
   // Build images array from saved mockups.
-  // Use the direct usercontent URL (no redirects) so Shopify can fetch the image reliably.
+  // Use absolute=true to get the direct drive.usercontent.google.com URL —
+  // Shopify fetches this server-side so there is no browser CORP restriction.
   const images = (design.mockups ?? []).map((m) => ({
-    src: getDriveDirectUrl(m.driveFileId),
+    src: getDriveDirectUrl(m.driveFileId, true),
     alt: m.altText ?? undefined,
   }))
 

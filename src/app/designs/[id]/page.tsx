@@ -476,7 +476,7 @@ export default function DesignDetail() {
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
             {design.driveFileId && (
               <img
-                src={`https://drive.usercontent.google.com/download?id=${design.driveFileId}&export=view`}
+                src={`/api/drive-image/${design.driveFileId}`}
                 alt={design.designName}
                 style={{
                   width: 100,
@@ -811,7 +811,7 @@ export default function DesignDetail() {
                               <>
                                 <a href={viewUrl} target="_blank" rel="noopener noreferrer">
                                   <img
-                                    src={fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=view` : r.driveUrl}
+                                     src={fileId ? `/api/drive-image/${fileId}` : r.driveUrl}
                                     alt={(r as DesignMockup).altText || displayName}
                                     style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 140 }}
                                     onError={(e) => {
@@ -882,7 +882,7 @@ export default function DesignDetail() {
                                       <p style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{displayName}</p>
                                        <a href={viewUrl} target="_blank" rel="noopener noreferrer">
                                          <img
-                                           src={fileId ? `https://drive.usercontent.google.com/download?id=${fileId}&export=view` : ''}
+                                           src={fileId ? `/api/drive-image/${fileId}` : ''}
                                            alt={(m as DesignMockup).altText || displayName}
                                            style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
                                          />

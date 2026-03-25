@@ -203,6 +203,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 ## Known Issues / Backlog
 
+- Afbeeldingen worden niet getoond in de UI — `drive.usercontent.google.com/download?id=...&export=view` URLs laden niet in de browser (auth of CORS probleem) — **open**
 - Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access not yet verified in production
 - Stijlfamilies auto-generate: API not yet built (group designs into style families via Claude, write back to Notion)
 - EN translation: works via Claude, but was only recently wired up
@@ -254,3 +255,43 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - **sizeKey format**: `v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')` → e.g. `"500x350"`
 - **Root cause of old bug**: `m.templateId.includes(sizeKey)` was fragile — fixed by storing `sizeKey` in DB
 - **Alt text format**: `{designName} {productTypeNL} {label} — KitchenArt` (max 125 chars)
+
+---
+
+## Session — 2026-03-25 (vervolg): IB sizeKey aliases + thumbnail URL fix + performance
+
+### Changes committed (e15bc1d)
+
+**`src/lib/mockup-config.ts`**
+- Added `IB_SIZE_KEY_ALIASES`: maps 19 real IB variant sizeKeys → 8 PSD sizeKeys
+  e.g. `800x520`, `810x520`, `812x527`, `830x515` → `mockup-1 80x52`
+
+**`src/lib/mockup.ts`**
+- `generateAllMockupsForDesign`: resolves alias before finding PSD, passes `saveSizeKey` (original variant key)
+- `generateAndSaveSingleMockup`: accepts optional `saveSizeKey` param — stores original variant sizeKey in DB
+- `deleteMany` scoped to `{ designId, templateId, sizeKey }` zo rows don't overwrite each other
+
+**`src/app/designs/[id]/page.tsx`** + **`src/app/api/designs/upload/route.ts`**
+- All `drive.google.com/thumbnail?id=...` URLs replaced with `drive.usercontent.google.com/download?id=...&export=view`
+- Reden: thumbnail URL requires Google login in browser → broken `<img>` tags
+
+**`.env`**
+- `DATABASE_URL` updated: `file:./dev.db?connection_limit=1&socket_timeout=10`
+- Reden: SQLite single-writer; multiple Prisma connections queue → slow responses
+
+### Changes committed (099caa0)
+
+**`src/lib/shopify.ts`**
+- `shopifyFetch()`: added `signal: AbortSignal.timeout(8000)`
+- Reden: Node fetch heeft geen default timeout; stalled Shopify DNS/TCP hing ~25s
+
+**`src/app/designs/[id]/page.tsx`**
+- Removed `fetchShopifyPreview()` from initial `useEffect`
+- Replaced `shopifyPreview?.shopifyConfigured` state with `process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'`
+
+**`.env`** (local only, niet gecommit)
+- Added `NEXT_PUBLIC_SHOPIFY_CONFIGURED=true`
+
+### Open issue: afbeeldingen laden niet
+- `drive.usercontent.google.com/download?id=...&export=view` werkt niet in browser (auth of CORS)
+- Te onderzoeken: zijn Drive bestanden public, en welke URL-vorm werkt zonder login

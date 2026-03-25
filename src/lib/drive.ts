@@ -71,17 +71,24 @@ export async function uploadDesignToDrive(
   }
 }
 
-export function getDriveThumbnailUrl(fileId: string): string {
-  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
-}
-
 /**
- * Returns a direct-access URL for a Drive file that works without redirects.
- * Shopify (and browsers) can fetch this URL without any cookie/auth challenge.
- * Uses drive.usercontent.google.com which returns 200 image/jpeg directly.
+ * Returns a URL for a Drive file that can be embedded in <img> tags in the browser.
+ *
+ * We proxy through our own Next.js API route (/api/drive-image/{fileId}) because
+ * drive.usercontent.google.com sets `cross-origin-resource-policy: same-site`,
+ * which blocks cross-origin <img> loading in browsers.
+ *
+ * The proxy route fetches the image server-side (no CORP restriction) and
+ * re-serves it with proper caching headers.
+ *
+ * For server-side use (e.g. Shopify image src), pass absolute=true to get the
+ * full drive.usercontent.google.com URL directly.
  */
-export function getDriveDirectUrl(fileId: string): string {
-  return `https://drive.usercontent.google.com/download?id=${fileId}&export=view`
+export function getDriveDirectUrl(fileId: string, absolute = false): string {
+  if (absolute) {
+    return `https://drive.usercontent.google.com/download?id=${fileId}&export=view`
+  }
+  return `/api/drive-image/${fileId}`
 }
 
 export async function deleteDesignFromDrive(fileId: string): Promise<void> {
