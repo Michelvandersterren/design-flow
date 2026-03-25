@@ -382,11 +382,14 @@ function addCutContourSpotColor(
   const contentStreamRef = context.register(contentStream)
 
   // Append aan bestaande pagina content
+  // pdf-lib stelt Contents al in als PDFArray na drawImage() — push direct in die array.
+  // Nooit opnieuw wrappen: [ [6 0 R] 10 0 R ] is een ongeldige geneste array in PDF.
   const existingContents = page.node.lookup(PDFName.of('Contents'))
-  if (existingContents) {
-    // Wrap in array als het nog geen array is
-    const contentsArray = context.obj([existingContents, contentStreamRef])
-    page.node.set(PDFName.of('Contents'), contentsArray)
+  if (existingContents instanceof PDFArray) {
+    existingContents.push(contentStreamRef)
+  } else if (existingContents) {
+    // Enkel ref (niet array) — wrap wél in array
+    page.node.set(PDFName.of('Contents'), context.obj([existingContents, contentStreamRef]))
   } else {
     page.node.set(PDFName.of('Contents'), contentStreamRef)
   }
