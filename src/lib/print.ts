@@ -1,20 +1,35 @@
+/**
+ * print.ts — Node.js PDF generatie voor KitchenArt printbestanden
+ *
+ * Spec (gebaseerd op Probo .joboptions preset + reverse-engineering van Probo PDFs):
+ *   - Bleed: 10mm per kant (= BleedOffset 28.34646 pt in preset)
+ *   - Pagina = MediaBox = BleedBox = TrimBox = (productW + 20mm) × (productH + 20mm)
+ *   - ArtBox = productrand (10mm inset van MediaBox)
+ *   - Design afbeelding: cover-scaled, geplaatst op volledige pagina, 150 dpi downsampled, lossless PNG
+ *   - CutContour: rounded rect, 10mm inset, 5mm corner radius, spot color "Cutcontour"
+ *     (0C 100M 0Y 0K), 0.25pt stroke, overprint ON
+ *   - Spot color naam: "Cutcontour" (lowercase c — exact zoals in Probo reference PDF)
+ *   - PDF 1.7 compatibel
+ *   - FOGRA39 CMYK ICC profiel ingebed
+ */
+
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { spawn } from 'child_process'
+import { PDFDocument, PDFName, PDFNumber, PDFString, PDFHexString, PDFArray, PDFDict, PDFRef, PDFStream, PDFRawStream } from 'pdf-lib'
+import sharp from 'sharp'
 import { prisma } from './prisma'
 import { uploadPrintFileToDrive } from './drive'
 import { getPrintTemplateForSize, buildPrintFileName } from './print-config'
 import type { PrintTemplate } from './print-config'
 
-const JSX_SCRIPT        = path.join(process.cwd(), 'scripts', 'generate-print.jsx')
-const BATCH_CONFIG_PATH = '/tmp/print-batch-job.json'
-const BATCH_RESULT_PATH = '/tmp/print-batch-result.json'
-const OUT_DIR           = path.join(os.tmpdir(), 'print-out')
-
-// One Illustrator session for all PDFs — allow 10 minutes total
-const AI_TIMEOUT_MS    = 10 * 60 * 1000
-const POLL_INTERVAL_MS = 3_000
+// ── Constanten (exact conform Probo preset en reference PDFs) ──────────────
+const MM_TO_PT    = 72 / 25.4          // 1mm = 2.834645669 pt
+const BLEED_MM    = 10                 // BleedOffset in preset = 28.34646 pt = 10mm
+const CORNER_MM   = 5                  // corner radius CutContour
+const STROKE_PT   = 0.25              // CutContour stroke breedte
+const TARGET_DPI  = 150               // preset: ColorImageResolution 150
+const SPOT_NAME   = 'Cutcontour'      // exact zoals in Probo reference PDF (lowercase c)
 
 export interface PrintFileResult {
   sizeKey: string
@@ -27,114 +42,11 @@ export interface PrintFileResult {
   skipReason?: string
 }
 
-interface BatchJobItem {
-  sizeKey: string
-  designPath: string
-  outPath: string
-  widthMM: number
-  heightMM: number
-}
+// ── Hoofd exportfuncties ──────────────────────────────────────────────────
 
 /**
- * Run ALL print PDFs for a design in a single Illustrator session.
- *
- * The JSX script reads /tmp/print-batch-job.json (array of jobs) and
- * processes them one by one, writing each PDF as it goes.
- * We poll until ALL output files exist.
- */
-async function generateBatchViaIllustrator(
-  jobs: BatchJobItem[],
-  designCode: string
-): Promise<void> {
-  if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true })
-
-  // Remove any stale output PDFs for this run
-  for (const job of jobs) {
-    if (fs.existsSync(job.outPath)) fs.unlinkSync(job.outPath)
-  }
-  if (fs.existsSync(BATCH_RESULT_PATH)) fs.unlinkSync(BATCH_RESULT_PATH)
-
-  // Write batch config
-  fs.writeFileSync(BATCH_CONFIG_PATH, JSON.stringify({ jobs }))
-
-  // Write AppleScript with generous timeout (10 min)
-  const appleScriptPath = path.join(os.tmpdir(), `print-batch-${designCode}.applescript`)
-  fs.writeFileSync(appleScriptPath, [
-    `with timeout of 600 seconds`,
-    `  tell application "Adobe Illustrator"`,
-    `    do javascript file "${JSX_SCRIPT}"`,
-    `  end tell`,
-    `end timeout`,
-  ].join('\n'), 'utf-8')
-
-  const child = spawn('osascript', [appleScriptPath], {
-    detached: false,
-    stdio: ['ignore', 'ignore', 'pipe'],
-  })
-  child.stderr?.on('data', (d: Buffer) => {
-    console.error('[print osascript stderr]', d.toString())
-  })
-
-  // Poll until ALL expected PDFs exist, or result file signals an early error
-  const deadline = Date.now() + AI_TIMEOUT_MS
-  await new Promise<void>((resolve, reject) => {
-    const interval = setInterval(() => {
-      try {
-        // Check if batch result file exists (error signal from JSX)
-        if (fs.existsSync(BATCH_RESULT_PATH) && fs.statSync(BATCH_RESULT_PATH).size > 0) {
-          clearInterval(interval)
-          resolve()
-          return
-        }
-        // Check if all output PDFs exist and have content
-        const allDone = jobs.every(
-          (j) => fs.existsSync(j.outPath) && fs.statSync(j.outPath).size > 0
-        )
-        if (allDone) {
-          clearInterval(interval)
-          resolve()
-          return
-        }
-        const doneSoFar = jobs.filter(
-          (j) => fs.existsSync(j.outPath) && fs.statSync(j.outPath).size > 0
-        ).length
-        console.log(`[print] ${doneSoFar}/${jobs.length} PDFs gereed...`)
-
-        if (Date.now() > deadline) {
-          clearInterval(interval)
-          reject(new Error(`Illustrator timeout — slechts ${doneSoFar}/${jobs.length} PDFs gegenereerd`))
-        }
-      } catch {
-        // statSync can throw transiently — keep polling
-      }
-    }, POLL_INTERVAL_MS)
-  })
-
-  // Check for batch result error
-  if (fs.existsSync(BATCH_RESULT_PATH) && fs.statSync(BATCH_RESULT_PATH).size > 0) {
-    try {
-      const raw = fs.readFileSync(BATCH_RESULT_PATH, 'utf-8')
-      console.log('[print batch result]', raw)
-      const parsed = JSON.parse(raw)
-      if (!parsed.success) {
-        throw new Error(`Illustrator batch fout: ${parsed.error}`)
-      }
-    } catch (e) {
-      if (e instanceof SyntaxError) {
-        console.warn('[print] Could not parse batch result JSON, continuing')
-      } else {
-        throw e
-      }
-    }
-  }
-
-  // Clean up
-  try { fs.unlinkSync(appleScriptPath) } catch (_) {}
-}
-
-/**
- * Generate print PDFs for all size variants of a design in one Illustrator session,
- * then upload all to Drive in parallel.
+ * Genereer printbestanden voor ALLE size-varianten van een design.
+ * PDFs worden parallel gebouwd en geüpload.
  */
 export async function generateAllPrintFilesForDesign(designId: string): Promise<PrintFileResult[]> {
   const design = await prisma.design.findUnique({
@@ -152,12 +64,11 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
       skipped: true, skipReason: `Printbestanden nog niet ondersteund voor ${productType}` }]
   }
 
-  // Unique variant sizeKeys
+  // Unieke sizeKeys
   const variantSizeKeys = [...new Set(
     design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
   )]
 
-  // Match to print templates
   const templates: PrintTemplate[] = []
   for (const sizeKey of variantSizeKeys) {
     const tmpl = getPrintTemplateForSize('IB', sizeKey)
@@ -169,76 +80,17 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
       skipped: true, skipReason: 'Geen print templates gevonden voor de varianten van dit design' }]
   }
 
-  // Download design image once (full resolution — no resize for Illustrator)
+  // Download design image eenmalig
   const designBuffer = await getDesignImageBuffer(design.driveFileId)
-  const designTempPath = path.join(os.tmpdir(), `print-design-${design.designCode}.jpg`)
-  fs.writeFileSync(designTempPath, designBuffer)
 
-  // Build batch jobs
-  const batchJobs: BatchJobItem[] = templates.map((tmpl) => ({
-    sizeKey:    tmpl.sizeKey,
-    designPath: designTempPath,
-    outPath:    path.join(OUT_DIR, buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)),
-    widthMM:    tmpl.widthMM,
-    heightMM:   tmpl.heightMM,
-  }))
-
-  // Generate all PDFs in one Illustrator session
-  try {
-    await generateBatchViaIllustrator(batchJobs, design.designCode)
-  } finally {
-    try { fs.unlinkSync(designTempPath) } catch (_) {}
-  }
-
-  // Upload all to Drive in parallel, save to DB
+  // Genereer + upload alle PDFs parallel
   const results = await Promise.all(
-    templates.map(async (tmpl, i): Promise<PrintFileResult> => {
-      const job      = batchJobs[i]
-      const fileName = buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)
-      try {
-        if (!fs.existsSync(job.outPath) || fs.statSync(job.outPath).size === 0) {
-          return { sizeKey: tmpl.sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-            driveFileId: '', driveUrl: '', fileName,
-            skipped: true, skipReason: 'Illustrator heeft geen PDF gegenereerd voor dit formaat' }
-        }
-
-        const pdfBuffer = fs.readFileSync(job.outPath)
-        const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, design.designCode)
-        try { fs.unlinkSync(job.outPath) } catch (_) {}
-
-        // Upsert DB row
-        await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey: tmpl.sizeKey } })
-        await prisma.designPrintFile.create({
-          data: {
-            designId,
-            productType,
-            sizeKey:     tmpl.sizeKey,
-            widthMM:     tmpl.widthMM,
-            heightMM:    tmpl.heightMM,
-            fileName,
-            driveFileId: uploaded.fileId,
-            driveUrl:    uploaded.webViewLink,
-          },
-        })
-
-        return {
-          sizeKey:     tmpl.sizeKey,
-          widthMM:     tmpl.widthMM,
-          heightMM:    tmpl.heightMM,
-          driveFileId: uploaded.fileId,
-          driveUrl:    uploaded.webViewLink,
-          fileName,
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        return { sizeKey: tmpl.sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-          driveFileId: '', driveUrl: '', fileName,
-          skipped: true, skipReason: `Fout bij uploaden: ${msg}` }
-      }
-    })
+    templates.map((tmpl) =>
+      buildAndUploadPrintFile(designId, productType, design.designCode, tmpl, designBuffer)
+    )
   )
 
-  // Mark workflow step
+  // Markeer workflow stap
   const successCount = results.filter((r) => !r.skipped).length
   if (successCount > 0) {
     await prisma.workflowStep.upsert({
@@ -254,8 +106,7 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
 }
 
 /**
- * Regenerate a single print file for a specific sizeKey.
- * Still uses the batch infrastructure (batch of 1) for consistency.
+ * Regenereer één printbestand voor een specifiek sizeKey.
  */
 export async function regenerateSinglePrintFile(
   designId: string,
@@ -275,64 +126,272 @@ export async function regenerateSinglePrintFile(
   const tmpl = getPrintTemplateForSize('IB', sizeKey)
   if (!tmpl) throw new Error(`Geen print template gevonden voor sizeKey: ${sizeKey}`)
 
-  const designBuffer   = await getDesignImageBuffer(design.driveFileId)
-  const designTempPath = path.join(os.tmpdir(), `print-design-${design.designCode}.jpg`)
-  fs.writeFileSync(designTempPath, designBuffer)
-
-  const fileName = buildPrintFileName(productType, design.designCode, tmpl.widthMM, tmpl.heightMM)
-  const outPath  = path.join(OUT_DIR, fileName)
-
-  const batchJobs: BatchJobItem[] = [{
-    sizeKey:    tmpl.sizeKey,
-    designPath: designTempPath,
-    outPath,
-    widthMM:    tmpl.widthMM,
-    heightMM:   tmpl.heightMM,
-  }]
-
-  try {
-    await generateBatchViaIllustrator(batchJobs, design.designCode)
-  } finally {
-    try { fs.unlinkSync(designTempPath) } catch (_) {}
-  }
-
-  if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
-    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-      driveFileId: '', driveUrl: '', fileName,
-      skipped: true, skipReason: 'Illustrator heeft geen PDF gegenereerd' }
-  }
-
-  try {
-    const pdfBuffer = fs.readFileSync(outPath)
-    const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, design.designCode)
-    try { fs.unlinkSync(outPath) } catch (_) {}
-
-    await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey } })
-    await prisma.designPrintFile.create({
-      data: { designId, productType, sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-              fileName, driveFileId: uploaded.fileId, driveUrl: uploaded.webViewLink },
-    })
-
-    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-             driveFileId: uploaded.fileId, driveUrl: uploaded.webViewLink, fileName }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { sizeKey, widthMM: tmpl.widthMM, heightMM: tmpl.heightMM,
-      driveFileId: '', driveUrl: '', fileName,
-      skipped: true, skipReason: `Fout bij uploaden: ${msg}` }
-  }
+  const designBuffer = await getDesignImageBuffer(design.driveFileId)
+  return buildAndUploadPrintFile(designId, productType, design.designCode, tmpl, designBuffer)
 }
 
 /**
- * Delete all print file records for a design from the DB.
+ * Verwijder alle printbestand-records voor een design uit de DB.
  */
 export async function deleteAllPrintFilesForDesign(designId: string): Promise<number> {
   const { count } = await prisma.designPrintFile.deleteMany({ where: { designId } })
   return count
 }
 
+// ── Interne functies ──────────────────────────────────────────────────────
+
 /**
- * Download design image from Drive at full resolution (no resize).
+ * Bouw één print-PDF en upload naar Drive. Sla op in DB.
+ */
+async function buildAndUploadPrintFile(
+  designId: string,
+  productType: string,
+  designCode: string,
+  tmpl: PrintTemplate,
+  designBuffer: Buffer
+): Promise<PrintFileResult> {
+  const fileName = buildPrintFileName(productType, designCode, tmpl.widthMM, tmpl.heightMM)
+
+  try {
+    const pdfBuffer = await buildPrintPdf(designBuffer, tmpl.widthMM, tmpl.heightMM)
+    const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, designCode)
+
+    await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey: tmpl.sizeKey } })
+    await prisma.designPrintFile.create({
+      data: {
+        designId,
+        productType,
+        sizeKey:     tmpl.sizeKey,
+        widthMM:     tmpl.widthMM,
+        heightMM:    tmpl.heightMM,
+        fileName,
+        driveFileId: uploaded.fileId,
+        driveUrl:    uploaded.webViewLink,
+      },
+    })
+
+    return {
+      sizeKey:     tmpl.sizeKey,
+      widthMM:     tmpl.widthMM,
+      heightMM:    tmpl.heightMM,
+      driveFileId: uploaded.fileId,
+      driveUrl:    uploaded.webViewLink,
+      fileName,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[print] Fout bij ${tmpl.sizeKey}:`, msg)
+    return {
+      sizeKey:    tmpl.sizeKey,
+      widthMM:    tmpl.widthMM,
+      heightMM:   tmpl.heightMM,
+      driveFileId: '',
+      driveUrl:   '',
+      fileName,
+      skipped:    true,
+      skipReason: `Fout bij genereren/uploaden: ${msg}`,
+    }
+  }
+}
+
+/**
+ * Bouw de print-PDF in memory.
+ *
+ * Pagina-structuur (conform Probo preset):
+ *   MediaBox = BleedBox = TrimBox = (productW + 2×10mm) × (productH + 2×10mm)
+ *   ArtBox   = product-rand (10mm inset)
+ *
+ * Lagen (onderaan → boven):
+ *   1. Design-afbeelding: cover-scaled, 150 dpi downgesampled, lossless PNG
+ *   2. CutContour: rounded rect, 10mm inset, 5mm radius, spot "Cutcontour", overprint ON
+ */
+async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: number): Promise<Buffer> {
+  // Paginaformaat in punten (product + bleed)
+  const pageW_pt = (widthMM  + 2 * BLEED_MM) * MM_TO_PT
+  const pageH_pt = (heightMM + 2 * BLEED_MM) * MM_TO_PT
+
+  const doc  = await PDFDocument.create()
+  const page = doc.addPage([pageW_pt, pageH_pt])
+
+  // ── 1. Design afbeelding ──────────────────────────────────────────────
+
+  // Downsample naar 150 dpi op de paginagrootte (in pixels)
+  const targetPxW = Math.round((pageW_pt / 72) * TARGET_DPI)
+  const targetPxH = Math.round((pageH_pt / 72) * TARGET_DPI)
+
+  // Cover-crop: schaal zodat de kortste zijde past, snijd de rest bij
+  const imgResized = await sharp(designBuffer)
+    .resize(targetPxW, targetPxH, { fit: 'cover', position: 'centre' })
+    .png({ compressionLevel: 6 })   // lossless, conform FlateEncode in preset
+    .toBuffer()
+
+  const embeddedImg = await doc.embedPng(imgResized)
+
+  // Teken de afbeelding op de volledige pagina
+  page.drawImage(embeddedImg, {
+    x:      0,
+    y:      0,
+    width:  pageW_pt,
+    height: pageH_pt,
+  })
+
+  // ── 2. CutContour spot color laag ────────────────────────────────────
+
+  addCutContourSpotColor(doc, page, pageW_pt, pageH_pt)
+
+  // ── 3. Boxes: TrimBox en ArtBox (10mm inset) ─────────────────────────
+
+  const inset_pt = BLEED_MM * MM_TO_PT
+  // pdf-lib stelt MediaBox al in via addPage([w, h])
+  // TrimBox = MediaBox (conform PDFXSetBleedBoxToMediaBox: true)
+  page.node.set(PDFName.of('TrimBox'), doc.context.obj([0, 0, pageW_pt, pageH_pt]))
+  page.node.set(PDFName.of('BleedBox'), doc.context.obj([0, 0, pageW_pt, pageH_pt]))
+  // ArtBox = productrand
+  page.node.set(PDFName.of('ArtBox'), doc.context.obj([
+    inset_pt,
+    inset_pt,
+    pageW_pt - inset_pt,
+    pageH_pt - inset_pt,
+  ]))
+
+  const pdfBytes = await doc.save()
+  return Buffer.from(pdfBytes)
+}
+
+/**
+ * Voeg CutContour spot color toe via raw PDF content stream operators.
+ *
+ * Spot color definitie:
+ *   [/Separation /Cutcontour /DeviceCMYK tintTransform]
+ *   tintTransform: f(t) = [0, t, 0, 0]  →  0C, t×100M, 0Y, 0K
+ *
+ * Rounded rect als PDF path, 10mm inset, 5mm corner radius.
+ * Stroke met spot color, 0.25pt breedte, overprint ON.
+ */
+function addCutContourSpotColor(
+  doc: PDFDocument,
+  page: ReturnType<PDFDocument['addPage']>,
+  pageW_pt: number,
+  pageH_pt: number
+): void {
+  const context = doc.context
+
+  // Tint transform Type 4 function: f(t) = [0, t, 0, 0]
+  // PostScript: { 0 exch 0 0 } → stack [0, t, 0, 0] na uitvoering
+  const tintFuncDict: Record<string, unknown> = {
+    FunctionType: 4,
+    Domain: [0, 1],
+    Range: [0, 1, 0, 1, 0, 1, 0, 1],
+  }
+  const tintFuncContent = Buffer.from('{ 0 exch 0 0 }')
+  const tintFuncStream = context.flateStream(tintFuncContent, tintFuncDict as never)
+  const tintFuncRef = context.register(tintFuncStream)
+
+  // Separation colorspace array
+  const separationCS = context.obj([
+    PDFName.of('Separation'),
+    PDFName.of(SPOT_NAME),
+    PDFName.of('DeviceCMYK'),
+    tintFuncRef,
+  ])
+  const separationCSRef = context.register(separationCS)
+
+  // Voeg colorspace toe aan pagina Resources
+  const resources = page.node.Resources()
+  let csDict: PDFDict
+  const existingCS = resources.lookup(PDFName.of('ColorSpace'))
+  if (existingCS instanceof PDFDict) {
+    csDict = existingCS
+  } else {
+    csDict = context.obj({})
+    resources.set(PDFName.of('ColorSpace'), csDict)
+  }
+  csDict.set(PDFName.of('CutcontourCS'), separationCSRef)
+
+  // ── Rounded rect padh-coördinaten ────────────────────────────────────
+  // 10mm inset, 5mm corner radius
+  const inset_pt  = BLEED_MM  * MM_TO_PT
+  const radius_pt = CORNER_MM * MM_TO_PT
+
+  // Rechthoek grenzen (product-rand)
+  const x0 = inset_pt
+  const y0 = inset_pt
+  const x1 = pageW_pt - inset_pt
+  const y1 = pageH_pt - inset_pt
+  const r  = radius_pt
+
+  // Bézier approximatie voor kwart-cirkel: k = 0.5523
+  const k = 0.5522847498
+
+  // PDF content stream voor rounded rect + spot color stroke
+  // cs = set colorspace (stroke), SC = set spot color value (tint 1.0 = 100%)
+  // J = line cap (1 = round), w = line width, S = stroke
+  // 2 = overprint mode ON via /ExtGState
+  const pathOps = [
+    // GraphicsState: overprint stroke ON
+    'q',
+    '/CutcontourGS gs',
+    // Colorspace instellen op spot color
+    '/CutcontourCS CS',
+    // Spot color tint = 1.0 (100% = 0C 100M 0Y 0K)
+    '1 SC',
+    // Lijnbreedte
+    `${STROKE_PT} w`,
+    // Round line cap & join
+    '1 J',
+    '1 j',
+    // Rounded rect path (met bézier curves)
+    `${x0 + r} ${y0} m`,                              // bottom-left begin
+    `${x1 - r} ${y0} l`,                              // bottom rechts
+    `${x1 - r} ${y0} ${x1} ${y0} ${x1} ${y0 + r} c`, // bottom-right hoek
+    `${x1} ${y1 - r} l`,                              // rechts boven
+    `${x1} ${y1 - r} ${x1} ${y1} ${x1 - r} ${y1} c`, // top-right hoek
+    `${x0 + r} ${y1} l`,                              // boven links
+    `${x0 + r} ${y1} ${x0} ${y1} ${x0} ${y1 - r} c`, // top-left hoek
+    `${x0} ${y0 + r} l`,                              // links onder
+    `${x0} ${y0 + r} ${x0} ${y0} ${x0 + r} ${y0} c`, // bottom-left hoek
+    'h',                                               // close path
+    'S',                                               // stroke (geen fill)
+    'Q',
+  ].join('\n')
+
+  // ExtGState voor overprint stroke
+  const gsDict = context.obj({
+    Type: PDFName.of('ExtGState'),
+    op: true,    // overprint stroke
+    OP: true,    // overprint fill (ook instellen voor zekerheid)
+    OPM: 1,
+  })
+  const gsRef = context.register(gsDict)
+
+  // Voeg ExtGState toe aan pagina Resources
+  let extGStateDict: PDFDict
+  const existingGS = resources.lookup(PDFName.of('ExtGState'))
+  if (existingGS instanceof PDFDict) {
+    extGStateDict = existingGS
+  } else {
+    extGStateDict = context.obj({})
+    resources.set(PDFName.of('ExtGState'), extGStateDict)
+  }
+  extGStateDict.set(PDFName.of('CutcontourGS'), gsRef)
+
+  // Voeg content stream toe aan pagina
+  const contentStream = context.flateStream(Buffer.from(pathOps), {})
+  const contentStreamRef = context.register(contentStream)
+
+  // Append aan bestaande pagina content
+  const existingContents = page.node.lookup(PDFName.of('Contents'))
+  if (existingContents) {
+    // Wrap in array als het nog geen array is
+    const contentsArray = context.obj([existingContents, contentStreamRef])
+    page.node.set(PDFName.of('Contents'), contentsArray)
+  } else {
+    page.node.set(PDFName.of('Contents'), contentStreamRef)
+  }
+}
+
+/**
+ * Download design afbeelding van Google Drive.
  */
 async function getDesignImageBuffer(driveFileId: string): Promise<Buffer> {
   const { google } = await import('googleapis')
@@ -340,7 +399,7 @@ async function getDesignImageBuffer(driveFileId: string): Promise<Buffer> {
 
   const auth = new google.auth.JWT({
     email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: GOOGLE_PRIVATE_KEY,
+    key:   GOOGLE_PRIVATE_KEY,
     scopes: ['https://www.googleapis.com/auth/drive'],
   })
   const drive = google.drive({ version: 'v3', auth })

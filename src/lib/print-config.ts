@@ -1,21 +1,13 @@
 /**
  * Print file template configuration for KitchenArt product types.
  *
- * Each template maps a sizeKey to:
- *   - psdPath: absolute path to the PSD (used as the "size reference" file for Illustrator)
- *   - sizeKey: the normalized variant size key (e.g. "520x350")
- *   - widthMM / heightMM: product dimensions in mm (parsed from PSD filename)
+ * Each template maps a sizeKey to the product dimensions.
+ * PDFs worden gegenereerd via src/lib/print.ts (Node.js / pdf-lib).
  *
- * The Illustrator JSX script (scripts/generate-print.jsx) receives:
- *   - The PSD path (to read dimensions from the filename, e.g. "520-350.psd")
- *   - The design image path (downloaded from Drive)
- *   - The output PDF path
- *
- * The script creates:
- *   1. A new CMYK Illustrator document at (productW + 30mm) × (productH + 30mm) [15mm bleed each side]
- *   2. Design image on "Design" layer — scaled to cover artboard, embedded
- *   3. CutContour rounded rect on "CutContour" layer — spot color 0C 100M 0Y 0K, 0.25pt stroke, overprint ON
- *   4. Exported with "Grootformaat op 100% 05-2019" preset (or PDF/X-4 fallback)
+ * Spec (conform Probo .joboptions preset + Probo reference PDFs):
+ *   - Bleed: 10mm per kant
+ *   - Pagina = MediaBox = BleedBox = TrimBox = (productW + 20mm) × (productH + 20mm)
+ *   - CutContour: spot color "Cutcontour", 0C 100M 0Y 0K, 0.25pt stroke, overprint ON
  *
  * Output filename format: ib-{designCode}-{width}-{height}.pdf
  * Example: ib-soazb-520-350.pdf
