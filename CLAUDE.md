@@ -89,8 +89,9 @@ design-flow/
 
 ### DesignMockup
 - `templateId`, `outputName`, `productType`
+- `sizeKey`: e.g. `"500x350"` for size-specific templates (null for generic)
 - `driveFileId`, `driveUrl` (webContentLink)
-- `altText`: auto-generated deterministic alt text
+- `altText`: SEO alt text using template label, e.g. `"Botanisch inductiebeschermer sfeer keuken — KitchenArt"`
 
 ### WorkflowStep
 - `step`, `status`: pending | in_progress | completed | failed
@@ -205,3 +206,51 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access not yet verified in production
 - Stijlfamilies auto-generate: API not yet built (group designs into style families via Claude, write back to Notion)
 - EN translation: works via Claude, but was only recently wired up
+
+---
+
+## Session — 2026-03-25: Mockup system refactor
+
+### Changes committed (16fd12d)
+
+**`prisma/schema.prisma`**
+- Added `sizeKey String?` to `DesignMockup` model; `prisma db push` already applied
+
+**`src/lib/mockup-config.ts`**
+- Added `label: string` to `MockupTemplate` interface
+- All templates now have meaningful `outputName` slugs (e.g. `sfeer-keuken`, `product-50x35`)
+- Added `getTemplateById(templateId)` helper
+
+**`src/lib/mockup.ts`**
+- `buildMockupAltText` uses `template.label` instead of stripping `"mockup-"` prefix
+- Drive filename format: `{designCode}-{productType}-{outputName}.jpg`
+- New `generateAllMockupsForDesign` — single entry point (generic + size-specific in one call)
+- New `regenerateSingleMockup(designId, templateId)` — per-template regeneration
+- New `deleteAllMockupsForDesign(designId)` — bulk delete from DB (Drive files kept)
+- Saves `sizeKey` field on `DesignMockup` records
+- Old functions kept as `@deprecated` wrappers
+
+**`src/app/api/designs/[id]/mockup/route.ts`**
+- `POST {}` → `generateAllMockupsForDesign()`
+- `POST { templateId }` → `regenerateSingleMockup()`
+- `DELETE` → `deleteAllMockupsForDesign()`
+
+**`src/app/globals.css`**
+- Added `btn-danger` + `btn-danger:hover`
+
+**`src/app/designs/[id]/page.tsx`**
+- `DesignMockup` interface: added `sizeKey?: string | null`
+- New state: `deletingMockups`, `regeneratingMockup`
+- New functions: `generateMockups()`, `regenerateMockup(templateId)`, `deleteAllMockups()`
+- Mockups UI: "Alle mockups verwijderen" button, ↺ per-mockup buttons, size-specific matched by `m.sizeKey === vSizeKey`
+
+**`src/lib/prisma.ts`**
+- Disabled verbose query logging — `log: ['error']` only
+
+**`package.json`**
+- `dev` script: `next dev --turbo` (Turbopack — 10-20x faster dev compile)
+
+### Architecture notes
+- **sizeKey format**: `v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')` → e.g. `"500x350"`
+- **Root cause of old bug**: `m.templateId.includes(sizeKey)` was fragile — fixed by storing `sizeKey` in DB
+- **Alt text format**: `{designName} {productTypeNL} {label} — KitchenArt` (max 125 chars)
