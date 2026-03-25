@@ -61,37 +61,72 @@ async function generatePrintViaIllustrator(
   // Remove stale result file
   if (fs.existsSync(RESULT_PATH)) fs.unlinkSync(RESULT_PATH)
 
-  // Fire osascript detached — Illustrator will run the JSX and write result when done
+  // Fire osascript — Illustrator will run the JSX and write result when done
+  // We capture stderr so errors from osascript/Illustrator are visible in Next.js logs.
   const jsxEscaped = JSX_SCRIPT.replace(/"/g, '\\"')
   const child = spawn(
     'osascript',
     ['-e', `tell application "Adobe Illustrator" to do javascript file "${jsxEscaped}"`],
-    { detached: true, stdio: 'ignore' }
+    { detached: false, stdio: ['ignore', 'ignore', 'pipe'] }
   )
-  child.unref()
+  child.stderr?.on('data', (d: Buffer) => {
+    console.error('[print osascript stderr]', d.toString())
+  })
 
-  // Poll for result file
+  // Poll for success: the output PDF exists and has content.
+  // The JSX result file is unreliable (Illustrator File.write() flushes 0 bytes on
+  // some systems), so we use the output PDF itself as the primary success signal.
   const deadline = Date.now() + AI_TIMEOUT_MS
   await new Promise<void>((resolve, reject) => {
     const interval = setInterval(() => {
-      if (fs.existsSync(RESULT_PATH)) {
-        clearInterval(interval)
-        resolve()
-      } else if (Date.now() > deadline) {
-        clearInterval(interval)
-        reject(new Error(`Illustrator timeout na ${AI_TIMEOUT_MS / 1000}s — geen resultaat ontvangen`))
+      try {
+        // Primary: PDF was written successfully
+        if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+          clearInterval(interval)
+          resolve()
+          return
+        }
+        // Early error signal: result file has content (JSX error path wrote something)
+        if (fs.existsSync(RESULT_PATH) && fs.statSync(RESULT_PATH).size > 0) {
+          clearInterval(interval)
+          resolve()
+          return
+        }
+        if (Date.now() > deadline) {
+          clearInterval(interval)
+          reject(new Error(`Illustrator timeout na ${AI_TIMEOUT_MS / 1000}s — geen PDF gegenereerd`))
+        }
+      } catch {
+        // statSync can throw transiently — keep polling
       }
     }, POLL_INTERVAL_MS)
   })
 
-  const result = JSON.parse(fs.readFileSync(RESULT_PATH, 'utf-8'))
+  // Check for explicit error written by JSX (if result file has content)
+  if (fs.existsSync(RESULT_PATH) && fs.statSync(RESULT_PATH).size > 0) {
+    try {
+      const raw = fs.readFileSync(RESULT_PATH, 'utf-8')
+      console.log('[print result raw]', raw)
+      const parsed = JSON.parse(raw)
+      if (!parsed.success) {
+        throw new Error(`Illustrator fout: ${parsed.error}`)
+      }
+    } catch (parseErr) {
+      if (parseErr instanceof SyntaxError) {
+        console.warn('[print] Could not parse result JSON, ignoring:', parseErr.message)
+      } else {
+        throw parseErr
+      }
+    }
+  }
+
+  // Verify the PDF was actually created
+  if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
+    throw new Error(`Illustrator heeft geen PDF gegenereerd op: ${outPath}`)
+  }
 
   // Clean up temp design file
   try { fs.unlinkSync(designTempPath) } catch (_) {}
-
-  if (!result.success) {
-    throw new Error(`Illustrator fout: ${result.error}`)
-  }
 
   return outPath
 }
