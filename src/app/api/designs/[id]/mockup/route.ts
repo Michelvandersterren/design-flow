@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { generateMockupsForDesign, generateSizeSpecificMockupsForDesign, checkTemplateStatus } from '@/lib/mockup'
+import {
+  generateAllMockupsForDesign,
+  regenerateSingleMockup,
+  deleteAllMockupsForDesign,
+  checkTemplateStatus,
+} from '@/lib/mockup'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -7,9 +12,8 @@ import { prisma } from '@/lib/prisma'
  * Generate mockups for a design.
  *
  * Body (optional):
- *   {}                            — generate generic templates only
- *   { sizeKey: "600x300" }        — generate generic + one size-specific template
- *   { sizeKey: "all-size-specific" } — generate all size-specific templates for all variants
+ *   {}                        — generate ALL mockups (generic + size-specific for real variants)
+ *   { templateId: "IB-..." }  — regenerate a single template
  *
  * Returns list of generated mockups with Drive URLs.
  */
@@ -20,13 +24,16 @@ export async function POST(
   try {
     const { id: designId } = await params
     const body = await request.json().catch(() => ({}))
-    const sizeKey: string | undefined = body?.sizeKey
+    const templateId: string | undefined = body?.templateId
 
     let results
-    if (sizeKey === 'all-size-specific') {
-      results = await generateSizeSpecificMockupsForDesign(designId)
+    if (templateId) {
+      // Single-template regeneration
+      const result = await regenerateSingleMockup(designId, templateId)
+      results = [result]
     } else {
-      results = await generateMockupsForDesign(designId, sizeKey)
+      // Generate all (generic + size-specific matched to variants)
+      results = await generateAllMockupsForDesign(designId)
     }
 
     const generated = results.filter((r) => !r.skipped)
@@ -46,8 +53,27 @@ export async function POST(
 }
 
 /**
+ * DELETE /api/designs/[id]/mockup
+ * Delete all mockup records for a design from the DB.
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: designId } = await params
+    const count = await deleteAllMockupsForDesign(designId)
+    return NextResponse.json({ success: true, deleted: count })
+  } catch (error) {
+    console.error('Mockup verwijderen fout:', error)
+    const message = error instanceof Error ? error.message : 'Verwijderen mislukt'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+/**
  * GET /api/designs/[id]/mockup
- * Check which mockup templates are ready (PNG exported) for this design's product type.
+ * Check which mockup templates are ready (PSD exists on disk) for this design's product type.
  */
 export async function GET(
   request: NextRequest,

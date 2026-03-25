@@ -111,8 +111,9 @@ model DesignMockup {
   design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
   templateId  String   // e.g. "IB-mockup3"
-  outputName  String   // e.g. "mockup-3"
+  outputName  String   // e.g. "sfeer-keuken" — Drive filename slug
   productType String   // IB | SP | MC
+  sizeKey     String?  // e.g. "500x350" for size-specific templates
   driveFileId String
   driveUrl    String
   altText     String?  // SEO alt-tekst specifiek voor deze mockup afbeelding

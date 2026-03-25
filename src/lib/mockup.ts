@@ -4,7 +4,7 @@ import os from 'os'
 import { spawn, execSync } from 'child_process'
 import { prisma } from './prisma'
 import { getFileAsBase64, uploadDesignToDrive } from './drive'
-import { getTemplatesForProduct, getSizeSpecificTemplates } from './mockup-config'
+import { getTemplatesForProduct, getSizeSpecificTemplates, getTemplateById } from './mockup-config'
 import type { MockupTemplate } from './mockup-config'
 
 const JSX_SCRIPT = path.join(process.cwd(), 'scripts', 'generate-mockup.jsx')
@@ -19,6 +19,8 @@ const POLL_INTERVAL_MS = 2_000
 export interface MockupResult {
   templateId: string
   outputName: string
+  label: string
+  sizeKey?: string
   driveFileId: string
   driveUrl: string
   skipped?: boolean
@@ -33,16 +35,11 @@ const PRODUCT_TYPE_NL: Record<string, string> = {
 
 /**
  * Bouwt een SEO alt-tekst voor een mockup afbeelding.
- * Deterministisch — geen AI-aanroep nodig.
+ * Gebruikt het template label — bijv. "sfeer keuken" — voor een beschrijvende, unieke alt.
  */
-function buildMockupAltText(designName: string, productType: string, outputName: string): string {
+function buildMockupAltText(designName: string, productType: string, label: string): string {
   const typeNl = PRODUCT_TYPE_NL[productType] ?? productType.toLowerCase()
-  // outputName is like "mockup-3" or "mockup-lifestyle" — trim the "mockup-" prefix
-  const scene = outputName.replace(/^mockup-?/i, '').replace(/-/g, ' ').trim()
-  if (scene) {
-    return `${designName} ${typeNl} mockup — ${scene} — KitchenArt`.slice(0, 125)
-  }
-  return `${designName} ${typeNl} — KitchenArt`.slice(0, 125)
+  return `${designName} ${typeNl} ${label} — KitchenArt`.slice(0, 125)
 }
 
 /**
@@ -113,102 +110,140 @@ async function generateMockupViaPhotoshop(
 }
 
 /**
- * Generate all mockups for a design using Photoshop, then upload to Google Drive.
+ * Build the Drive filename for a mockup.
+ * Format: {designCode}-{productType}-{outputName}.jpg
+ * Example: KA001-IB-sfeer-keuken.jpg
  */
-export async function generateMockupsForDesign(
+function buildDriveFilename(designCode: string, productType: string, outputName: string): string {
+  return `${designCode}-${productType}-${outputName}.jpg`
+}
+
+/**
+ * Generate and save a single mockup template for a design.
+ * Used both by batch generation and per-template regeneration.
+ */
+async function generateAndSaveSingleMockup(
   designId: string,
-  sizeKey?: string
-): Promise<MockupResult[]> {
+  designCode: string,
+  designName: string,
+  productType: 'IB' | 'SP' | 'MC',
+  designBuffer: Buffer,
+  template: MockupTemplate
+): Promise<MockupResult> {
+  try {
+    const outPath = await generateMockupViaPhotoshop(designBuffer, template, designCode)
+
+    const mockupBuffer = fs.readFileSync(outPath)
+    const mockupFileName = buildDriveFilename(designCode, productType, template.outputName)
+
+    const uploaded = await uploadDesignToDrive(
+      mockupBuffer,
+      mockupFileName,
+      'image/jpeg',
+      `${designCode}-mockup`
+    )
+
+    try { fs.unlinkSync(outPath) } catch (_) {}
+
+    const altText = buildMockupAltText(designName, productType, template.label)
+
+    // Delete existing record for this template, then create fresh
+    await prisma.designMockup.deleteMany({
+      where: { designId, templateId: template.id },
+    })
+    await prisma.designMockup.create({
+      data: {
+        designId,
+        templateId: template.id,
+        outputName: template.outputName,
+        productType,
+        sizeKey: template.sizeKey ?? null,
+        driveFileId: uploaded.fileId,
+        driveUrl: uploaded.webContentLink,
+        altText,
+      },
+    })
+
+    return {
+      templateId: template.id,
+      outputName: template.outputName,
+      label: template.label,
+      sizeKey: template.sizeKey,
+      driveFileId: uploaded.fileId,
+      driveUrl: uploaded.webContentLink,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return {
+      templateId: template.id,
+      outputName: template.outputName,
+      label: template.label,
+      sizeKey: template.sizeKey,
+      driveFileId: '',
+      driveUrl: '',
+      skipped: true,
+      skipReason: `Fout bij genereren: ${msg}`,
+    }
+  }
+}
+
+/**
+ * Generate ALL mockups for a design (generic + all size-specific matched to variants).
+ * This is the single entry point for "Mockups genereren".
+ */
+export async function generateAllMockupsForDesign(designId: string): Promise<MockupResult[]> {
   const design = await prisma.design.findUnique({
     where: { id: designId },
-    include: { variants: { take: 1 } },
+    include: { variants: true },
   })
 
   if (!design) throw new Error(`Design niet gevonden: ${designId}`)
   if (!design.driveFileId) throw new Error('Geen Drive-bestand gekoppeld aan dit design')
 
-  // Prefer variant productType, fall back to design.designType
   const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
   if (!productType) throw new Error('Geen producttype gevonden — stel designType in of genereer eerst varianten')
 
-  // Download design image from Drive
+  // Download design image once
   const { base64 } = await getFileAsBase64(design.driveFileId)
   const designBuffer = Buffer.from(base64, 'base64')
 
-  const templates = getTemplatesForProduct(productType, sizeKey)
+  // Generic templates (no sizeKey)
+  const genericTemplates = getTemplatesForProduct(productType, undefined)
+
+  // Size-specific templates filtered to actual variant sizes
+  const variantSizeKeys = new Set(
+    design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
+  )
+  const allSizeSpecific = getSizeSpecificTemplates(productType)
+  const sizeSpecificTemplates = allSizeSpecific.filter(
+    (t) => t.sizeKey && variantSizeKeys.has(t.sizeKey)
+  )
+
+  const templates = [...genericTemplates, ...sizeSpecificTemplates]
 
   if (templates.length === 0) {
     return [{
       templateId: 'none',
       outputName: 'none',
+      label: 'geen templates',
       driveFileId: '',
       driveUrl: '',
       skipped: true,
-      skipReason: `Geen templates geconfigureerd voor ${productType}${sizeKey ? ` maat ${sizeKey}` : ''}`,
+      skipReason: `Geen templates geconfigureerd voor ${productType}`,
     }]
   }
 
   const results: MockupResult[] = []
 
   for (const template of templates) {
-    try {
-      const outPath = await generateMockupViaPhotoshop(designBuffer, template, design.designCode)
-
-      const mockupBuffer = fs.readFileSync(outPath)
-      const mockupFileName = `${design.designCode}-${productType}-${template.outputName}.jpg`
-
-      const uploaded = await uploadDesignToDrive(
-        mockupBuffer,
-        mockupFileName,
-        'image/jpeg',
-        `${design.designCode}-mockup`
-      )
-
-      results.push({
-        templateId: template.id,
-        outputName: template.outputName,
-        driveFileId: uploaded.fileId,
-        driveUrl: uploaded.webContentLink,
-      })
-
-      try { fs.unlinkSync(outPath) } catch (_) {}
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      results.push({
-        templateId: template.id,
-        outputName: template.outputName,
-        driveFileId: '',
-        driveUrl: '',
-        skipped: true,
-        skipReason: `Fout bij genereren: ${msg}`,
-      })
-    }
-  }
-
-  // Save all successful mockups to the DesignMockup table (upsert by templateId)
-  const successes = results.filter((r) => !r.skipped)
-  for (const r of successes) {
-    const altText = buildMockupAltText(design.designName, productType, r.outputName)
-    // Delete existing record for this template so we can replace it cleanly
-    await prisma.designMockup.deleteMany({
-      where: { designId, templateId: r.templateId },
-    })
-    await prisma.designMockup.create({
-      data: {
-        designId,
-        templateId: r.templateId,
-        outputName: r.outputName,
-        productType,
-        driveFileId: r.driveFileId,
-        driveUrl: r.driveUrl,
-        altText,
-      },
-    })
+    const result = await generateAndSaveSingleMockup(
+      designId, design.designCode, design.designName, productType, designBuffer, template
+    )
+    results.push(result)
   }
 
   // Save first successful mockup URL to variants (used as "main" mockup thumbnail)
-  const firstSuccess = successes[0]
+  const firstSuccess = results.find((r) => !r.skipped)
   if (firstSuccess) {
     await prisma.variant.updateMany({
       where: { designId, productType },
@@ -222,17 +257,56 @@ export async function generateMockupsForDesign(
         step: 'MOCKUP_GENERATION',
         status: 'COMPLETED',
         completedAt: new Date(),
-        data: JSON.stringify({ mockups: successes.length }),
+        data: JSON.stringify({ mockups: results.filter((r) => !r.skipped).length }),
       },
       update: {
         status: 'COMPLETED',
         completedAt: new Date(),
-        data: JSON.stringify({ mockups: successes.length }),
+        data: JSON.stringify({ mockups: results.filter((r) => !r.skipped).length }),
       },
     })
   }
 
   return results
+}
+
+/**
+ * Regenerate a single mockup by templateId.
+ * Used by the per-mockup "Opnieuw genereren" button.
+ */
+export async function regenerateSingleMockup(
+  designId: string,
+  templateId: string
+): Promise<MockupResult> {
+  const design = await prisma.design.findUnique({
+    where: { id: designId },
+    include: { variants: { take: 1 } },
+  })
+
+  if (!design) throw new Error(`Design niet gevonden: ${designId}`)
+  if (!design.driveFileId) throw new Error('Geen Drive-bestand gekoppeld aan dit design')
+
+  const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
+  if (!productType) throw new Error('Geen producttype gevonden')
+
+  const template = getTemplateById(templateId)
+  if (!template) throw new Error(`Template niet gevonden: ${templateId}`)
+
+  const { base64 } = await getFileAsBase64(design.driveFileId)
+  const designBuffer = Buffer.from(base64, 'base64')
+
+  return generateAndSaveSingleMockup(
+    designId, design.designCode, design.designName, productType, designBuffer, template
+  )
+}
+
+/**
+ * Delete all mockups for a design from the DB.
+ * Does NOT delete the Drive files (they can be reused / overwritten on next generation).
+ */
+export async function deleteAllMockupsForDesign(designId: string): Promise<number> {
+  const { count } = await prisma.designMockup.deleteMany({ where: { designId } })
+  return count
 }
 
 /**
@@ -248,104 +322,51 @@ export function checkTemplateStatus(productType: 'IB' | 'SP' | 'MC') {
   }))
 }
 
+// ---------------------------------------------------------------------------
+// Legacy exports — kept for backwards compatibility during transition
+// ---------------------------------------------------------------------------
+
 /**
- * Generate size-specific mockups for all variants of a design in one pass.
- * Only generates templates whose sizeKey matches an actual variant of the design.
- * Generic templates are NOT included (those are handled by generateMockupsForDesign).
+ * @deprecated Use generateAllMockupsForDesign instead.
+ * Kept temporarily so the old API route still compiles.
+ */
+export async function generateMockupsForDesign(
+  designId: string,
+  sizeKey?: string
+): Promise<MockupResult[]> {
+  if (!sizeKey || sizeKey === 'all') {
+    return generateAllMockupsForDesign(designId)
+  }
+
+  // Single-sizeKey path (used by old per-variant buttons — may be removed later)
+  const design = await prisma.design.findUnique({
+    where: { id: designId },
+    include: { variants: { take: 1 } },
+  })
+  if (!design) throw new Error(`Design niet gevonden: ${designId}`)
+  if (!design.driveFileId) throw new Error('Geen Drive-bestand gekoppeld')
+
+  const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
+  if (!productType) throw new Error('Geen producttype')
+
+  const { base64 } = await getFileAsBase64(design.driveFileId)
+  const designBuffer = Buffer.from(base64, 'base64')
+
+  const templates = getTemplatesForProduct(productType, sizeKey)
+  const results: MockupResult[] = []
+  for (const template of templates) {
+    results.push(await generateAndSaveSingleMockup(
+      designId, design.designCode, design.designName, productType, designBuffer, template
+    ))
+  }
+  return results
+}
+
+/**
+ * @deprecated Use generateAllMockupsForDesign instead.
  */
 export async function generateSizeSpecificMockupsForDesign(
   designId: string
 ): Promise<MockupResult[]> {
-  const design = await prisma.design.findUnique({
-    where: { id: designId },
-    include: { variants: true },
-  })
-
-  if (!design) throw new Error(`Design niet gevonden: ${designId}`)
-  if (!design.driveFileId) throw new Error('Geen Drive-bestand gekoppeld aan dit design')
-
-  const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
-  if (!productType) throw new Error('Geen producttype gevonden')
-
-  // Collect all sizeKeys from variants
-  const variantSizeKeys = new Set(
-    design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
-  )
-
-  // Get all size-specific templates for this product type, filtered to the variant sizes
-  const allSizeTemplates = getSizeSpecificTemplates(productType)
-  const relevantTemplates = allSizeTemplates.filter((t) => t.sizeKey && variantSizeKeys.has(t.sizeKey))
-
-  if (relevantTemplates.length === 0) {
-    return [{
-      templateId: 'none',
-      outputName: 'none',
-      driveFileId: '',
-      driveUrl: '',
-      skipped: true,
-      skipReason: `Geen maat-specifieke templates gevonden voor varianten: ${[...variantSizeKeys].join(', ')}`,
-    }]
-  }
-
-  // Download design image once
-  const { base64 } = await getFileAsBase64(design.driveFileId)
-  const designBuffer = Buffer.from(base64, 'base64')
-
-  const results: MockupResult[] = []
-
-  for (const template of relevantTemplates) {
-    try {
-      const outPath = await generateMockupViaPhotoshop(designBuffer, template, design.designCode)
-
-      const mockupBuffer = fs.readFileSync(outPath)
-      const mockupFileName = `${design.designCode}-${productType}-${template.outputName}-${template.sizeKey}.jpg`
-
-      const uploaded = await uploadDesignToDrive(
-        mockupBuffer,
-        mockupFileName,
-        'image/jpeg',
-        `${design.designCode}-mockup`
-      )
-
-      results.push({
-        templateId: template.id,
-        outputName: template.outputName,
-        driveFileId: uploaded.fileId,
-        driveUrl: uploaded.webContentLink,
-      })
-
-      try { fs.unlinkSync(outPath) } catch (_) {}
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      results.push({
-        templateId: template.id,
-        outputName: template.outputName,
-        driveFileId: '',
-        driveUrl: '',
-        skipped: true,
-        skipReason: `Fout bij genereren: ${msg}`,
-      })
-    }
-  }
-
-  // Save successful results to DB
-  const successes = results.filter((r) => !r.skipped)
-  for (const r of successes) {
-    const altText = buildMockupAltText(design.designName, productType, r.outputName)
-    await prisma.designMockup.deleteMany({ where: { designId, templateId: r.templateId } })
-    await prisma.designMockup.create({
-      data: {
-        designId,
-        templateId: r.templateId,
-        outputName: r.outputName,
-        productType,
-        driveFileId: r.driveFileId,
-        driveUrl: r.driveUrl,
-        altText,
-      },
-    })
-  }
-
-  return results
+  return generateAllMockupsForDesign(designId)
 }

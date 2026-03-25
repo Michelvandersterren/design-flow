@@ -92,6 +92,16 @@ h2 {
   background: #059669;
 }
 
+.btn-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.btn-danger:hover {
+  background: #fca5a5;
+}
+
 .btn-sm {
   padding: 6px 12px;
   font-size: 12px;

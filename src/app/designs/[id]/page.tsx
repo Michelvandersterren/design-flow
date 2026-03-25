@@ -8,6 +8,7 @@ interface DesignMockup {
   templateId: string
   outputName: string
   productType: string
+  sizeKey?: string | null
   driveFileId: string
   driveUrl: string
   altText: string | null
@@ -68,6 +69,8 @@ interface Design {
 interface MockupGenerateResult {
   templateId: string
   outputName: string
+  label?: string
+  sizeKey?: string
   driveFileId: string
   driveUrl: string
   skipped?: boolean
@@ -86,7 +89,8 @@ export default function DesignDetail() {
   const [forking, setForking] = useState(false)
   const [shopifyPreview, setShopifyPreview] = useState<{ shopifyConfigured: boolean; payload?: unknown } | null>(null)
   const [generatingMockups, setGeneratingMockups] = useState(false)
-  const [generatingSizeSpecific, setGeneratingSizeSpecific] = useState(false)
+  const [deletingMockups, setDeletingMockups] = useState(false)
+  const [regeneratingMockup, setRegeneratingMockup] = useState<string | null>(null) // templateId being regenerated
   const [mockupProgress, setMockupProgress] = useState<{ current: number; total: number } | null>(null)
   const [newMockupResults, setNewMockupResults] = useState<MockupGenerateResult[] | null>(null)
   const [mockupStatus, setMockupStatus] = useState<{ readyCount: number; totalCount: number; templates: { id: string; file: string; ready: boolean }[] } | null>(null)
@@ -266,7 +270,6 @@ export default function DesignDetail() {
     if (!design) return
     setGeneratingMockups(true)
     setNewMockupResults(null)
-    // Estimate total templates
     const total = mockupStatus?.totalCount ?? 0
     setMockupProgress({ current: 0, total })
     try {
@@ -279,7 +282,6 @@ export default function DesignDetail() {
       if (data.results) {
         setNewMockupResults(data.results)
         setMockupProgress({ current: data.results.length, total: data.results.length })
-        // Refresh design to get saved mockups
         fetchDesign()
       } else {
         alert('Mockup generatie mislukt: ' + (data.error || 'onbekende fout'))
@@ -291,29 +293,49 @@ export default function DesignDetail() {
     }
   }
 
-  const generateSizeSpecificMockups = async () => {
+  const regenerateMockup = async (templateId: string) => {
     if (!design) return
-    setGeneratingSizeSpecific(true)
-    setNewMockupResults(null)
+    setRegeneratingMockup(templateId)
     try {
       const res = await fetch(`/api/designs/${params.id}/mockup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sizeKey: 'all-size-specific' }),
+        body: JSON.stringify({ templateId }),
       })
       const data = await res.json()
       if (data.results) {
-        setNewMockupResults((prev) => [...(prev ?? []), ...data.results])
         fetchDesign()
       } else {
-        alert('Maat-specifieke mockups mislukt: ' + (data.error || 'onbekende fout'))
+        alert('Hergenerate mislukt: ' + (data.error || 'onbekende fout'))
       }
     } catch {
-      alert('Fout bij maat-specifieke mockup generatie')
+      alert('Fout bij hergenerate mockup')
     } finally {
-      setGeneratingSizeSpecific(false)
+      setRegeneratingMockup(null)
     }
   }
+
+  const deleteAllMockups = async () => {
+    if (!design) return
+    if (!confirm('Alle mockups verwijderen? Je kunt ze daarna opnieuw genereren.')) return
+    setDeletingMockups(true)
+    setNewMockupResults(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/mockup`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.success) {
+        fetchDesign()
+      } else {
+        alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch {
+      alert('Fout bij verwijderen mockups')
+    } finally {
+      setDeletingMockups(false)
+    }
+  }
+
+  const generateSizeSpecificMockups = async () => { /* legacy — not used */ }
 
   const openEditMode = () => {
     if (!design) return
@@ -451,10 +473,10 @@ export default function DesignDetail() {
 
   // Combine saved DB mockups with any freshly generated ones this session
   const savedMockups = design.mockups ?? []
-  const displayMockups: { templateId: string; outputName: string; driveUrl: string; skipped?: boolean; skipReason?: string; isNew?: boolean }[] =
+  const displayMockups: (DesignMockup & { isNew?: boolean } | MockupGenerateResult & { isNew?: boolean })[] =
     newMockupResults
       ? newMockupResults.map((r) => ({ ...r, isNew: true }))
-      : savedMockups.map((m) => ({ templateId: m.templateId, outputName: m.outputName, driveUrl: m.driveUrl }))
+      : savedMockups.map((m) => ({ ...m, isNew: false }))
 
   return (
     <div className="container">
@@ -661,9 +683,13 @@ export default function DesignDetail() {
                 className="btn btn-secondary"
                 onClick={generateMockups}
                 disabled={generatingMockups || design.variants.length === 0}
-                title={design.variants.length === 0 ? 'Maak eerst varianten aan' : 'Genereer mockups vanuit templates'}
+                title={design.variants.length === 0 ? 'Maak eerst varianten aan' : 'Genereer alle mockups (generiek + maat-specifiek)'}
               >
-                {generatingMockups ? 'Mockups genereren...' : savedMockups.length > 0 ? `Mockups opnieuw genereren (${savedMockups.length} opgeslagen)` : 'Mockups genereren'}
+                {generatingMockups
+                  ? 'Mockups genereren...'
+                  : savedMockups.length > 0
+                    ? `Alle mockups opnieuw genereren (${savedMockups.length} opgeslagen)`
+                    : 'Alle mockups genereren'}
               </button>
             </div>
 
@@ -729,7 +755,7 @@ export default function DesignDetail() {
       </div>
 
       {/* Mockups sectie */}
-      {(displayMockups.length > 0 || generatingMockups) && (
+      {(displayMockups.length > 0 || generatingMockups || savedMockups.length > 0) && (
         <div className="card" style={{ marginBottom: 30 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h2 style={{ margin: 0 }}>
@@ -741,153 +767,173 @@ export default function DesignDetail() {
               )}
               {newMockupResults && (
                 <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 400, marginLeft: 8 }}>
-                  {newMockupResults.filter((r) => !r.skipped).length} nieuw gegenereerd
+                  {newMockupResults.filter((r) => !r.skipped).length} gegenereerd
                 </span>
               )}
             </h2>
+            {savedMockups.length > 0 && !generatingMockups && (
+              <button
+                className="btn btn-danger"
+                style={{ fontSize: 12 }}
+                onClick={deleteAllMockups}
+                disabled={deletingMockups}
+                title="Verwijder alle mockups uit de database zodat je opnieuw kunt beginnen"
+              >
+                {deletingMockups ? 'Verwijderen...' : 'Alle mockups verwijderen'}
+              </button>
+            )}
           </div>
 
           {generatingMockups ? (
             <div style={{ padding: '30px 0', textAlign: 'center', color: '#6b7280' }}>
-              <p>Photoshop genereert mockups... Dit kan 5-10 minuten duren.</p>
+              <p>Photoshop genereert mockups... Dit kan 10-20 minuten duren (alle templates).</p>
             </div>
           ) : displayMockups.length === 0 ? (
             <p style={{ color: '#6b7280' }}>Geen mockups gegenereerd.</p>
           ) : (
             <>
               {/* Generieke mockups */}
-              <div style={{ marginBottom: 20 }}>
-                <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
-                  Generieke mockups
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  {displayMockups.map((r) => {
-                    const fileId = (r as DesignMockup).driveFileId || r.driveUrl.match(/[?&]id=([^&]+)/)?.[1] || r.driveUrl.match(/\/d\/([^/]+)\//)?.[1]
-                    const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : r.driveUrl
-                    return (
-                      <div key={r.templateId} style={{
-                        border: '1px solid #e5e7eb',
-                        borderRadius: 8,
-                        padding: 10,
-                        minWidth: 170,
-                        maxWidth: 200,
-                        background: r.isNew ? '#f0fdf4' : '#fff',
-                      }}>
-                        <p style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: '#374151' }}>{r.outputName}</p>
-                        {r.skipped ? (
-                          <p style={{ fontSize: 11, color: '#f59e0b' }}>Overgeslagen: {r.skipReason}</p>
-                        ) : (
-                          <>
-                            <a href={viewUrl} target="_blank" rel="noopener noreferrer">
-                              <img
-                                src={fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w400` : r.driveUrl}
-                                alt={(r as DesignMockup).altText || r.outputName}
-                                style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 140 }}
-                                onError={(e) => {
-                                  const img = e.target as HTMLImageElement
-                                  if (!img.dataset.fallback) {
-                                    img.dataset.fallback = '1'
-                                    img.src = r.driveUrl
-                                  }
-                                }}
-                              />
-                            </a>
-                            {(r as DesignMockup).altText && (
-                              <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 3, fontStyle: 'italic' }} title="Alt-tekst voor Shopify">
-                                {(r as DesignMockup).altText}
-                              </p>
+              {(() => {
+                const genericMockups = displayMockups.filter((r) => !(r as DesignMockup).sizeKey)
+                if (genericMockups.length === 0) return null
+                return (
+                  <div style={{ marginBottom: 24 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Generieke mockups
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                      {genericMockups.map((r) => {
+                        const fileId = (r as DesignMockup).driveFileId || r.driveUrl.match(/[?&]id=([^&]+)/)?.[1] || r.driveUrl.match(/\/d\/([^/]+)\//)?.[1]
+                        const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : r.driveUrl
+                        const displayName = (r as MockupGenerateResult).label || (r as DesignMockup).outputName || r.outputName
+                        const isRegenerating = regeneratingMockup === r.templateId
+                        return (
+                          <div key={r.templateId} style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: 8,
+                            padding: 10,
+                            minWidth: 170,
+                            maxWidth: 200,
+                            background: (r as MockupGenerateResult & { isNew?: boolean }).isNew ? '#f0fdf4' : '#fff',
+                          }}>
+                            <p style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: '#374151' }}>{displayName}</p>
+                            {r.skipped ? (
+                              <p style={{ fontSize: 11, color: '#f59e0b' }}>Overgeslagen: {r.skipReason}</p>
+                            ) : (
+                              <>
+                                <a href={viewUrl} target="_blank" rel="noopener noreferrer">
+                                  <img
+                                    src={fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w400` : r.driveUrl}
+                                    alt={(r as DesignMockup).altText || displayName}
+                                    style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 140 }}
+                                    onError={(e) => {
+                                      const img = e.target as HTMLImageElement
+                                      if (!img.dataset.fallback) { img.dataset.fallback = '1'; img.src = r.driveUrl }
+                                    }}
+                                  />
+                                </a>
+                                {(r as DesignMockup).altText && (
+                                  <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 3, fontStyle: 'italic' }} title="Alt-tekst voor Shopify">
+                                    {(r as DesignMockup).altText}
+                                  </p>
+                                )}
+                                <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                                  <a href={viewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#2563eb' }}>Openen</a>
+                                  <button
+                                    onClick={() => regenerateMockup(r.templateId)}
+                                    disabled={!!regeneratingMockup || generatingMockups}
+                                    style={{ fontSize: 10, color: '#6b7280', background: 'none', border: '1px solid #d1d5db', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}
+                                    title="Genereer deze mockup opnieuw"
+                                  >
+                                    {isRegenerating ? '...' : '↺'}
+                                  </button>
+                                </div>
+                              </>
                             )}
-                            <p style={{ fontSize: 11, color: '#2563eb', marginTop: 4 }}>
-                              <a href={viewUrl} target="_blank" rel="noopener noreferrer">Openen in Drive</a>
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Size-specific mockups per variant */}
-              {design.variants.length > 0 && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, margin: 0 }}>
+              {design.variants.length > 0 && (() => {
+                // Use DB sizeKey field if available, else fallback to templateId heuristic
+                const sizeSpecificMockups = displayMockups.filter((r) => !!(r as DesignMockup).sizeKey)
+                if (sizeSpecificMockups.length === 0) return null
+                return (
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
                       Maat-specifieke mockups
                     </p>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ fontSize: 12 }}
-                      onClick={generateSizeSpecificMockups}
-                      disabled={generatingSizeSpecific || generatingMockups || design.variants.length === 0}
-                      title="Genereer maat-specifieke mockups voor alle varianten in één keer"
-                    >
-                      {generatingSizeSpecific
-                        ? 'Bezig...'
-                        : (() => {
-                            const sizeSpecificCount = (design.mockups ?? []).filter((m) =>
-                              design.variants.some((v) =>
-                                m.templateId.includes(v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
-                              )
-                            ).length
-                            return sizeSpecificCount > 0
-                              ? `Maat-mockups opnieuw genereren (${sizeSpecificCount} opgeslagen)`
-                              : 'Alle maat-specifieke mockups genereren'
-                          })()
-                      }
-                    </button>
-                  </div>
-                  {generatingSizeSpecific && (
-                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
-                      Photoshop werkt aan maat-specifieke mockups... (kan enkele minuten duren)
-                    </p>
-                  )}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {design.variants.map((v) => {
-                      const sizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
-                      const sizeSpecificMockups = (design.mockups ?? []).filter(
-                        (m) => m.templateId.includes(sizeKey)
-                      )
-                      return (
-                        <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 10 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
-                              {v.productType} — {v.size}
-                            </span>
-                            <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.sku}</span>
-                          </div>
-                          {sizeSpecificMockups.length > 0 ? (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                              {sizeSpecificMockups.map((m) => {
-                                const viewUrl = `https://drive.google.com/file/d/${m.driveFileId}/view`
-                                return (
-                                  <div key={m.id} style={{ width: 140 }}>
-                                    <a href={viewUrl} target="_blank" rel="noopener noreferrer">
-                                      <img
-                                        src={`https://drive.google.com/thumbnail?id=${m.driveFileId}&sz=w300`}
-                                        alt={m.outputName}
-                                        style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
-                                      />
-                                    </a>
-                                    <p style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{m.outputName}</p>
-                                    <a href={viewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#2563eb' }}>Openen</a>
-                                  </div>
-                                )
-                              })}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {design.variants.map((v) => {
+                        const vSizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
+                        const variantMockups = sizeSpecificMockups.filter(
+                          (r) => (r as DesignMockup).sizeKey === vSizeKey
+                        )
+                        return (
+                          <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                                {v.productType} — {v.size}
+                              </span>
+                              <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.sku}</span>
                             </div>
-                          ) : (
-                            <p style={{ fontSize: 11, color: '#9ca3af' }}>Nog geen maat-specifieke mockup gegenereerd.</p>
-                          )}
-                        </div>
-                      )
-                    })}
+                            {variantMockups.length > 0 ? (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                {variantMockups.map((m) => {
+                                  const fileId = (m as DesignMockup).driveFileId || ''
+                                  const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
+                                  const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
+                                  const isRegenerating = regeneratingMockup === m.templateId
+                                  return (
+                                    <div key={m.templateId} style={{ width: 150 }}>
+                                      <p style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{displayName}</p>
+                                      <a href={viewUrl} target="_blank" rel="noopener noreferrer">
+                                        <img
+                                          src={`https://drive.google.com/thumbnail?id=${fileId}&sz=w300`}
+                                          alt={(m as DesignMockup).altText || displayName}
+                                          style={{ width: '100%', borderRadius: 4, objectFit: 'cover', maxHeight: 100 }}
+                                        />
+                                      </a>
+                                      {(m as DesignMockup).altText && (
+                                        <p style={{ fontSize: 10, color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>
+                                          {(m as DesignMockup).altText}
+                                        </p>
+                                      )}
+                                      <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+                                        <a href={viewUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#2563eb' }}>Openen</a>
+                                        <button
+                                          onClick={() => regenerateMockup(m.templateId)}
+                                          disabled={!!regeneratingMockup || generatingMockups}
+                                          style={{ fontSize: 10, color: '#6b7280', background: 'none', border: '1px solid #d1d5db', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}
+                                          title="Genereer deze mockup opnieuw"
+                                        >
+                                          {isRegenerating ? '...' : '↺'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <p style={{ fontSize: 11, color: '#9ca3af' }}>Geen maat-specifieke mockup voor deze maat.</p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
             </>
           )}
         </div>
       )}
+
 
       {/* Template status — alleen tonen als templates ontbreken */}
       {mockupStatus && mockupStatus.readyCount < mockupStatus.totalCount && (
