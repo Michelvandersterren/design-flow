@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['@prisma/client', '@notionhq/client'],
+  serverExternalPackages: ['@prisma/client', '@notionhq/client', 'sharp', 'pdf-lib', 'googleapis', 'google-auth-library'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'drive.google.com' },
