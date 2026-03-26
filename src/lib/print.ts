@@ -17,6 +17,7 @@
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { PDFDocument, PDFName, PDFArray, PDFDict } from 'pdf-lib'
 import sharp from 'sharp'
 import { prisma } from './prisma'
 import { uploadPrintFileToDrive } from './drive'
@@ -203,9 +204,6 @@ async function buildAndUploadPrintFile(
  *      SP/MC: geen CutContour — alleen afbeelding met bleed
  */
 async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: number, productType: string): Promise<Buffer> {
-  // Dynamisch importeren — Turbopack kan pdf-lib niet top-level bundelen
-  const { PDFDocument, PDFName, PDFArray, PDFDict } = await import('pdf-lib')
-
   // Paginaformaat in punten (product + bleed)
   const pageW_pt = (widthMM  + 2 * BLEED_MM) * MM_TO_PT
   const pageH_pt = (heightMM + 2 * BLEED_MM) * MM_TO_PT
@@ -238,7 +236,7 @@ async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: nu
   // ── 2. CutContour spot color laag (IB only) ──────────────────────────
 
   if (productType === 'IB') {
-    addCutContourSpotColor(doc, page, pageW_pt, pageH_pt, PDFName, PDFArray, PDFDict)
+    addCutContourSpotColor(doc, page, pageW_pt, pageH_pt)
   }
 
   // ── 3. Boxes: TrimBox en ArtBox (10mm inset) ─────────────────────────
@@ -271,13 +269,10 @@ async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: nu
  * Stroke met spot color, 0.25pt breedte, overprint ON.
  */
 function addCutContourSpotColor(
-  doc: import('pdf-lib').PDFDocument,
-  page: ReturnType<import('pdf-lib').PDFDocument['addPage']>,
+  doc: PDFDocument,
+  page: ReturnType<PDFDocument['addPage']>,
   pageW_pt: number,
-  pageH_pt: number,
-  PDFName: typeof import('pdf-lib').PDFName,
-  PDFArray: typeof import('pdf-lib').PDFArray,
-  PDFDict: typeof import('pdf-lib').PDFDict,
+  pageH_pt: number
 ): void {
   const context = doc.context
 
