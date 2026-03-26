@@ -237,14 +237,17 @@ export async function buildShopifyProduct(designId: string) {
         ...(nlContent.description
           ? [{ namespace: 'custom', key: 'product_information',    value: nlContent.description,                    type: 'multi_line_text_field' }]
           : []),
-        ...(nlContent.description
-          ? [{ namespace: 'custom', key: 'marketplace_description', value: toBodyHtml(nlContent.description),       type: 'multi_line_text_field' }]
+        ...(nlContent.longDescription
+          ? [{ namespace: 'custom', key: 'marketplace_description', value: toBodyHtml(nlContent.longDescription),   type: 'multi_line_text_field' }]
           : []),
         ...(nlContent.longDescription
           ? [{ namespace: 'custom', key: 'long_description',       value: toBodyHtml(nlContent.longDescription),    type: 'multi_line_text_field' }]
           : []),
         ...(nlContent.googleShoppingDescription
           ? [{ namespace: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription,      type: 'single_line_text_field' }]
+          : []),
+        ...(design.content.find((c) => c.language === 'de')?.googleShoppingDescription
+          ? [{ namespace: 'custom', key: 'google_description_de',  value: design.content.find((c) => c.language === 'de')!.googleShoppingDescription!, type: 'single_line_text_field' }]
           : []),
         ...(nlContent.seoTitle
           ? [{ namespace: 'global', key: 'title_tag',              value: nlContent.seoTitle,                       type: 'single_line_text_field' }]
@@ -324,7 +327,9 @@ export async function createShopifyProduct(designId: string) {
  * Updates:
  *  - body_html (short description)
  *  - metafields: product_type, material, induction_compatible,
- *                long_description, global.title_tag, global.description_tag, google_shopping_description
+ *                product_information, marketplace_description (from longDescription),
+ *                long_description, google_description, google_description_de,
+ *                global.title_tag, global.description_tag
  */
 export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
   const design = await prisma.design.findUnique({
@@ -409,14 +414,18 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
 
   // 4. Upsert all content metafields
   if (nlContent.description) {
-    await upsertMetafield('custom', 'product_information',    nlContent.description,                          'multi_line_text_field')
-    await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.description),             'multi_line_text_field')
+    await upsertMetafield('custom', 'product_information',     nlContent.description,                          'multi_line_text_field')
   }
   if (nlContent.longDescription) {
-    await upsertMetafield('custom', 'long_description',       toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
+    await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
+    await upsertMetafield('custom', 'long_description',        toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
   }
   if (nlContent.googleShoppingDescription) {
-    await upsertMetafield('custom', 'google_description',     nlContent.googleShoppingDescription,            'single_line_text_field')
+    await upsertMetafield('custom', 'google_description',      nlContent.googleShoppingDescription,            'single_line_text_field')
+  }
+  const deContent = design.content.find((c) => c.language === 'de')
+  if (deContent?.googleShoppingDescription) {
+    await upsertMetafield('custom', 'google_description_de',   deContent.googleShoppingDescription,            'single_line_text_field')
   }
   if (nlContent.seoTitle) {
     await upsertMetafield('global', 'title_tag',              nlContent.seoTitle,                             'single_line_text_field')

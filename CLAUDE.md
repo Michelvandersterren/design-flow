@@ -661,3 +661,63 @@ GS1_SUBSCRIPTION_KEY=        # Ocp-Apim-Subscription-Key — nog toe te voegen a
 - Materiaal feed waarde: SP-varianten tonen vertaald label (GLAS→Gehard Glas etc.); IB/MC tonen statisch materiaal
 - Dimensies in cm berekend uit variant `size` veld (mm → cm met 1 decimaal)
 - `minWidth` van tabel vergroot naar 900px; horizontaal scrollbaar
+
+## Session — 2026-03-26 (vervolg): marketplace_description fix + google_description_de + translations fix
+
+### Bevinding: `custom.marketplace_description` correct waarde
+Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.marketplace_description` bevat **de long description als HTML** — niet de korte description. Vorige implementatie stuurde `toBodyHtml(description)` (fout); correct is `toBodyHtml(longDescription)`.
+
+### Changes committed:
+
+**`src/lib/shopify.ts`**
+
+- `buildShopifyProduct()`:
+  - `custom.marketplace_description`: waarde gewijzigd van `toBodyHtml(nlContent.description)` naar `toBodyHtml(nlContent.longDescription)` — conditioneel op `longDescription` (niet meer op `description`)
+  - Nieuw: `custom.google_description_de` — DE Google Shopping description als aparte metafield (niet via Translations API), waarde = `deContent.googleShoppingDescription`
+
+- `updateShopifyProduct()`:
+  - `custom.marketplace_description`: zelfde fix als hierboven
+  - `custom.product_information` en `custom.marketplace_description` nu apart geconditioneerd (i.p.v. beide op `nlContent.description`)
+  - Nieuw: upsert van `custom.google_description_de` uit DE content
+
+**`src/lib/shopify-translations.ts`**
+
+- Regel 184 bug gefixed: `custom.google_shopping_description` (stale key) vervangen door `custom.google_description`
+- Twee nieuwe metafield translations toegevoegd:
+  - `custom.product_information` → `content.description` (plain text, DE/EN versie)
+  - `custom.marketplace_description` → `toBodyHtml(content.longDescription)` (HTML, DE/EN versie)
+- Header comment bijgewerkt
+
+### Metafield overzicht (volledig, na deze sessie)
+
+**Product metafields (NL, via REST bij create/update):**
+| Metafield | Waarde |
+|---|---|
+| `custom.design_code` | `design.designCode` |
+| `custom.product_type` | `firstType` (IB/MC/SP) |
+| `custom.manufacturer` | `"probo"` |
+| `custom.modelnaam` | `design.designName` |
+| `custom.color_plain` | `"Full-colour"` |
+| `custom.google_custom_product` | `"True"` |
+| `custom.induction_compatible` | `String(design.inductionFriendly)` |
+| `custom.material` | per producttype (verbose label) |
+| `custom.material_plain` | per producttype (feed label) |
+| `custom.beschrijving_afbeelding` | `driveFileId` eerste mockup |
+| `custom.product_information` | `nlContent.description` (plain) |
+| `custom.marketplace_description` | `toBodyHtml(nlContent.longDescription)` (HTML) |
+| `custom.long_description` | `toBodyHtml(nlContent.longDescription)` (HTML) |
+| `custom.google_description` | `nlContent.googleShoppingDescription` |
+| `custom.google_description_de` | `deContent.googleShoppingDescription` (apart, niet via Translations API) |
+| `global.title_tag` | `nlContent.seoTitle` |
+| `global.description_tag` | `nlContent.seoDescription` |
+
+**Translations API (DE/EN/FR, via GraphQL):**
+| Metafield | Waarde |
+|---|---|
+| `body_html` | `toBodyHtml(content.description)` |
+| `custom.long_description` | `toBodyHtml(content.longDescription)` |
+| `custom.product_information` | `content.description` |
+| `custom.marketplace_description` | `toBodyHtml(content.longDescription)` |
+| `global.title_tag` | `content.seoTitle` |
+| `global.description_tag` | `content.seoDescription` |
+| `custom.google_description` | `content.googleShoppingDescription` |

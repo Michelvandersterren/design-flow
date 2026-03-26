@@ -10,10 +10,12 @@
  *
  * Fields pushed per locale:
  *   - Product: title, body_html
- *   - Metafield long_description: value
+ *   - Metafield custom.long_description: value
+ *   - Metafield custom.product_information: value
+ *   - Metafield custom.marketplace_description: value
  *   - Metafield global.title_tag: value
  *   - Metafield global.description_tag: value
- *   - Metafield custom.google_shopping_description: value
+ *   - Metafield custom.google_description: value
  */
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
@@ -178,10 +180,12 @@ async function pushTranslationsForLocale(
     }
   }
 
-  await addMetafieldTranslation('custom.long_description', toBodyHtml(content.longDescription), 'value')
-  await addMetafieldTranslation('global.title_tag', content.seoTitle, 'value')
-  await addMetafieldTranslation('global.description_tag', content.seoDescription, 'value')
-  await addMetafieldTranslation('custom.google_shopping_description', content.googleShoppingDescription, 'value')
+  await addMetafieldTranslation('custom.long_description',        toBodyHtml(content.longDescription),  'value')
+  await addMetafieldTranslation('custom.product_information',      content.description,                   'value')
+  await addMetafieldTranslation('custom.marketplace_description',  toBodyHtml(content.longDescription),   'value')
+  await addMetafieldTranslation('global.title_tag',                content.seoTitle,                      'value')
+  await addMetafieldTranslation('global.description_tag',          content.seoDescription,                'value')
+  await addMetafieldTranslation('custom.google_description',       content.googleShoppingDescription,     'value')
 
   // Register product-level translations
   if (translations.length > 0) {
