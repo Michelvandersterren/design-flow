@@ -331,11 +331,18 @@ export async function regenerateSingleMockup(
   const template = getTemplateById(templateId)
   if (!template) throw new Error(`Template niet gevonden: ${templateId}`)
 
+  // Retrieve the existing sizeKey so size-specific mockups keep their bucket after regeneration
+  const existing = await prisma.designMockup.findFirst({
+    where: { designId, templateId },
+    select: { sizeKey: true },
+  })
+
   const { base64 } = await getFileAsBase64(design.driveFileId)
   const designBuffer = Buffer.from(base64, 'base64')
 
   return generateAndSaveSingleMockup(
-    designId, design.designCode, design.designName, productType, designBuffer, template
+    designId, design.designCode, design.designName, productType, designBuffer, template,
+    existing?.sizeKey ?? undefined
   )
 }
 
