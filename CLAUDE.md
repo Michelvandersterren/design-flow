@@ -508,3 +508,12 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - SP: één PDF per unieke maat (G/BH0/BH4 materiaalvarianten delen hetzelfde printbestand — materiaal beïnvloedt alleen boorgaten/ophanging, niet het printoppervlak)
 - MC: geen cirkel-CutContour — zelfde afgeronde rechthoek als IB/SP; widthMM = heightMM = diameter
 - SP/MC `psdPath` veld is leeg string `""` (geen PSD-bestanden nodig — PDF wordt puur via pdf-lib gegenereerd)
+
+### Changes committed (f5f7a1a): Fix CutContour IB-only guard
+
+**`src/lib/print.ts`**
+- `buildPrintPdf()`: `productType: string` parameter toegevoegd
+- `addCutContourSpotColor()` wordt nu alleen aangeroepen als `productType === 'IB'`
+- SP/MC PDFs bevatten alleen afbeelding + bleed (geen CutContour)
+- Doc-comment bijgewerkt: "CutContour (IB only)" + SP/MC spec vermeld
+- `buildAndUploadPrintFile()`: geeft `productType` door aan `buildPrintPdf()`
