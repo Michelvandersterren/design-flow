@@ -558,10 +558,22 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 ```
 GS1_CLIENT_ID=               # sandbox client ID uit GS1 developer portal
 GS1_CLIENT_SECRET=           # sandbox client secret uit GS1 developer portal
-GS1_ACCOUNT_NUMBER=          # 13-cijferig accountnummer uit MijnGS1
-GS1_CONTRACT_NUMBER=         # Contractnummer uit MijnGS1 > Company > Contracts
+GS1_ACCOUNT_NUMBER=          # bedrijfsnummer uit MijnGS1 (huidig: 87214768)
+GS1_CONTRACT_NUMBER=         # contractnummer uit MijnGS1 > Company > Contracts
+GS1_SUBSCRIPTION_KEY=        # Ocp-Apim-Subscription-Key — nog toe te voegen aan gs1.ts
 ```
 
 **Non-fatal gedrag**: als `GS1_ACCOUNT_NUMBER` leeg is (dev/CI) skip de registratie stil. Als de API-aanroep faalt → `console.warn`, variant-aanmaak gaat door, `gs1Registered` blijft `false`.
 
 **Backfill bestaande EANs**: `POST /api/ean/gs1-sync` — idempotent, verwerkt alles met `gs1Registered=false`.
+
+### 🔴 Openstaand — wachten op subscription key
+
+**Probleem**: GTIN Registration API geeft `401: Access denied due to missing subscription key`. De API verwacht naast de Bearer token ook een `Ocp-Apim-Subscription-Key` header (Azure API Management).
+
+**Wat er nog moet gebeuren**:
+1. `GS1_SUBSCRIPTION_KEY` toevoegen aan `.env` — key staat op `https://gs1nl-api-acc-developer.gs1.nl` → profiel → subscriptions → Primary key (aangevraagd, nog niet ontvangen)
+2. `src/lib/gs1.ts` — `Ocp-Apim-Subscription-Key: ${GS1_SUBSCRIPTION_KEY}` toevoegen aan de fetch headers in `registerGtin()`
+3. Daarna opnieuw `POST /api/ean/gs1-sync` draaien om alle 300 bestaande EANs te registreren
+
+**Accountnummer**: `87214768` (bedrijfsnummer MijnGS1) — werkt, OAuth2 token wordt succesvol opgehaald. Onduidelijk of het 13-cijferig formaat vereist is; testen na subscription key fix.
