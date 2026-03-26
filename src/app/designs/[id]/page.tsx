@@ -1103,10 +1103,10 @@ export default function DesignDetail() {
                       <SectionLabel>Maat-specifieke mockups</SectionLabel>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
                         {sized.map((m) => {
-                          const fileId = (m as DesignMockup).driveFileId || ''
-                          const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
+                          const fileId = (m as DesignMockup).driveFileId || m.driveUrl?.match(/[?&]id=([^&]+)/)?.[1] || m.driveUrl?.match(/\/d\/([^/]+)\//)?.[1]
+                          const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : m.driveUrl
                           const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
-                          const imgSrc = fileId ? `/api/drive-image/${fileId}` : ''
+                          const imgSrc = fileId ? `/api/drive-image/${fileId}` : (m.driveUrl || '')
                           return (
                             <MockupCard
                               key={m.templateId}
