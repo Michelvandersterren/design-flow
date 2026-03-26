@@ -1261,6 +1261,45 @@ export default function DesignDetail() {
 
         {/* ═══════════════════════════════════════════════════════════ CONTENT */}
         {activeTab === 'content' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Shopify Metafields — read-only overzicht */}
+          {nlContent && (() => {
+            const firstType = design.variants[0]?.productType
+            const materialPlain: Record<string, string> = { IB: 'Vinyl', MC: 'Aluminium-Dibond', SP: 'Aluminium-Dibond' }
+            const materialFull: Record<string, string> = { IB: 'Vinyl texture overlay', MC: 'Aluminium-Dibond matte', SP: 'Aluminium-Dibond matte' }
+            const firstMockupFileId = design.mockups?.[0]?.driveFileId ?? null
+            const fields: { label: string; ns: string; key: string; value: string | null }[] = [
+              { label: 'custom.manufacturer',          ns: 'custom', key: 'manufacturer',          value: 'probo' },
+              { label: 'custom.modelnaam',              ns: 'custom', key: 'modelnaam',              value: design.designName },
+              { label: 'custom.color_plain',            ns: 'custom', key: 'color_plain',            value: 'Full-colour' },
+              { label: 'custom.google_custom_product',  ns: 'custom', key: 'google_custom_product',  value: 'True' },
+              { label: 'custom.material',               ns: 'custom', key: 'material',               value: firstType ? (materialFull[firstType] ?? null) : null },
+              { label: 'custom.material_plain',         ns: 'custom', key: 'material_plain',         value: firstType ? (materialPlain[firstType] ?? null) : null },
+              { label: 'custom.beschrijving_afbeelding',ns: 'custom', key: 'beschrijving_afbeelding',value: firstMockupFileId },
+              { label: 'custom.product_information',    ns: 'custom', key: 'product_information',    value: nlContent.description },
+              { label: 'custom.marketplace_description',ns: 'custom', key: 'marketplace_description',value: nlContent.description ? '(HTML versie van korte beschrijving)' : null },
+              { label: 'custom.long_description',       ns: 'custom', key: 'long_description',       value: nlContent.longDescription ? '(HTML versie van lange beschrijving)' : null },
+              { label: 'custom.google_description',     ns: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription },
+              { label: 'global.title_tag',              ns: 'global', key: 'title_tag',              value: nlContent.seoTitle },
+              { label: 'global.description_tag',        ns: 'global', key: 'description_tag',        value: nlContent.seoDescription },
+            ]
+            return (
+              <div className="card" style={{ marginBottom: 0 }}>
+                <h2 style={{ marginTop: 0, marginBottom: 14 }}>Shopify Metafields (product)</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 16px' }}>
+                  {fields.map(({ label, value }) => (
+                    <div key={label} style={{ display: 'flex', flexDirection: 'column', padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: 'monospace' }}>{label}</span>
+                      {value
+                        ? <span style={{ fontSize: 12, color: '#374151', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={value}>{value}</span>
+                        : <span style={{ fontSize: 12, color: '#d1d5db', marginTop: 2, fontStyle: 'italic' }}>— niet ingevuld</span>
+                      }
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
             {(['nl', 'de', 'en'] as const).map((lang) => {
               const c = lang === 'nl' ? nlContent : lang === 'de' ? deContent : enContent
@@ -1367,6 +1406,7 @@ export default function DesignDetail() {
               )
             })}
           </div>
+          </div>
         )}
 
         {/* ═══════════════════════════════════════════════════════════ VARIANTEN */}
@@ -1378,13 +1418,48 @@ export default function DesignDetail() {
                 {generating ? 'Aanmaken...' : design.variants.length > 0 ? 'Opnieuw aanmaken' : 'Varianten aanmaken'}
               </button>
             </div>
-            {design.variants.length > 0 ? (
+            {design.variants.length > 0 ? (() => {
+              // Helpers for metafield display
+              const materialPlainMap: Record<string, string> = { IB: 'Vinyl', MC: 'Aluminium-Dibond', SP: 'Aluminium-Dibond' }
+              const spMaterialLabels: Record<string, string> = { GLAS: 'Gehard Glas', BRUSHED: 'Brushed Aluminium', ALU: 'Aluminium-Dibond' }
+              const getVariantMaterialFeed = (v: Variant): string => {
+                if (v.productType === 'SP' && v.material) return spMaterialLabels[v.material] ?? v.material
+                return materialPlainMap[v.productType] ?? '—'
+              }
+              const getWidthCm = (v: Variant): string => {
+                if (v.productType === 'MC') return (Math.round(Number(v.size)) / 10).toFixed(1)
+                const w = Number(v.size.split('x')[0])
+                return (Math.round(w) / 10).toFixed(1)
+              }
+              const getHeightCm = (v: Variant): string => {
+                if (v.productType === 'MC') return (Math.round(Number(v.size)) / 10).toFixed(1)
+                const h = Number(v.size.split('x')[1])
+                return (Math.round(h) / 10).toFixed(1)
+              }
+              return (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 700 }}>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 900 }}>
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
-                      {['Type', 'Maat (mm)', 'Materiaal', 'SKU', 'EAN', 'Prijs', 'Gewicht (g)', 'Shopify ID'].map((h) => (
+                    <tr style={{ borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                      {['Type', 'Maat (mm)', 'SKU', 'EAN', 'Prijs', 'Shopify ID'].map((h) => (
                         <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{h}</th>
+                      ))}
+                      <th colSpan={5} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#6b7280', borderLeft: '2px solid #e5e7eb', fontSize: 11 }}>
+                        Shopify Metafields (variant)
+                      </th>
+                    </tr>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                      {['', '', '', '', '', ''].map((_, i) => (
+                        <th key={i} style={{ padding: '0 12px 6px' }} />
+                      ))}
+                      {[
+                        { key: 'materiaal', label: 'materiaal' },
+                        { key: 'breedte', label: 'breedte (cm)' },
+                        { key: 'hoogte', label: 'hoogte (cm)' },
+                        { key: 'mpn', label: 'mpn' },
+                        { key: 'condition', label: 'condition/gender/age' },
+                      ].map(({ key, label }) => (
+                        <th key={key} style={{ textAlign: 'left', padding: '0 12px 6px', fontWeight: 500, color: '#9ca3af', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, borderLeft: key === 'materiaal' ? '2px solid #e5e7eb' : undefined }}>{label}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1393,20 +1468,24 @@ export default function DesignDetail() {
                       <tr key={v.id} style={{ borderBottom: '1px solid #f5f5f5', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                         <td style={{ padding: '7px 12px' }}><span className="badge badge-draft" style={{ fontSize: 10 }}>{v.productType}</span></td>
                         <td style={{ padding: '7px 12px', fontWeight: 500 }}>{v.size}</td>
-                        <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.material ?? '—'}</td>
                         <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: '#374151' }}>{v.sku}</td>
                         <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.ean || '—'}</td>
                         <td style={{ padding: '7px 12px', fontWeight: 500 }}>{v.price != null ? `€${v.price.toFixed(2)}` : '—'}</td>
-                        <td style={{ padding: '7px 12px', color: '#6b7280' }}>{v.weight != null ? Math.round(v.weight * 1000) : '—'}</td>
                         <td style={{ padding: '7px 12px', fontFamily: 'monospace', fontSize: 10, color: v.shopifyProductId ? '#16a34a' : '#9ca3af' }}>
                           {v.shopifyProductId || '—'}
                         </td>
+                        <td style={{ padding: '7px 12px', color: '#374151', borderLeft: '2px solid #e5e7eb' }}>{getVariantMaterialFeed(v)}</td>
+                        <td style={{ padding: '7px 12px', color: '#374151' }}>{getWidthCm(v)}</td>
+                        <td style={{ padding: '7px 12px', color: '#374151' }}>{getHeightCm(v)}</td>
+                        <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: '#6b7280', fontSize: 11 }}>{v.sku}</td>
+                        <td style={{ padding: '7px 12px', color: '#6b7280', fontSize: 11 }}>new · unisex · adult</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            ) : (
+              )
+            })() : (
               <div style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af' }}>
                 <p style={{ marginBottom: 12 }}>Nog geen varianten aangemaakt.</p>
                 <button className="btn btn-primary" onClick={generateVariants} disabled={generating}>

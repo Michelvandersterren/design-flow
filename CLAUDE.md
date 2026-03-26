@@ -590,3 +590,74 @@ GS1_SUBSCRIPTION_KEY=        # Ocp-Apim-Subscription-Key — nog toe te voegen a
 - Font-size verhoogd van 10px → 11px; kleur van `#9ca3af` → `#6b7280` (meer contrast)
 - Italic stijl verwijderd; `title` attribuut toegevoegd (full tekst bij hover op ellipsis)
 - Conditional `{altText && altText !== name && ...}` vervangen door onvoorwaardelijke render
+
+---
+
+## Session — 2026-03-26 (vervolg): Drive proxy auth fix + SP sized mockup fix + Shopify metafields coverage + UI metafields
+
+### Changes committed (f9a503c): Drive proxy auth + SP sized mockup sizeKey fix
+
+**`src/app/api/drive-image/[fileId]/route.ts`**
+- Proxy gebruikt nu **Google APIs JWT service account** i.p.v. anonieme fetch
+- Imports: `google` + `JWT` uit `googleapis` en `google-auth-library`
+- Service account key ingelezen via `GOOGLE_SERVICE_ACCOUNT_KEY` env var (JSON string)
+- JWT scope: `https://www.googleapis.com/auth/drive.readonly`
+- Download URL: `https://www.googleapis.com/drive/v3/files/{fileId}?alt=media`
+- Access token wordt per request opgehaald via `jwt.getClient().getAccessToken()`
+- Fix: werkt nu voor bestanden in Shared Drive (vereisen auth)
+
+**`src/lib/mockup.ts`** (`regenerateSingleMockup`)
+- Laadt eerst bestaand `DesignMockup` record op uit DB om de originele `sizeKey` te bewaren
+- Zonder deze fix: na regeneratie werd `sizeKey = undefined` opgeslagen → sized mockups verdwenen uit UI
+- Geeft de `sizeKey` door aan `generateAndSaveSingleMockup()` als `saveSizeKey`
+
+### Changes committed (73c478b): Full Shopify metafield coverage (product + variant)
+
+**`src/lib/shopify.ts`**
+
+**Nieuwe product metafields in `buildShopifyProduct()`:**
+| Metafield | Waarde |
+|---|---|
+| `custom.manufacturer` | `"probo"` (statisch) |
+| `custom.modelnaam` | `design.designName` |
+| `custom.color_plain` | `"Full-colour"` (statisch) |
+| `custom.google_custom_product` | `"True"` (statisch) |
+| `custom.material_plain` | `"Vinyl"` / `"Aluminium-Dibond"` per producttype |
+| `custom.beschrijving_afbeelding` | `driveFileId` van eerste mockup |
+| `custom.product_information` | `nlContent.description` (plain text) |
+| `custom.marketplace_description` | `toBodyHtml(nlContent.description)` (HTML, voor Bol.com) |
+| `custom.google_description` | `nlContent.googleShoppingDescription` (renamed van `custom.google_shopping_description`) |
+
+**Nieuwe variant metafields per variant:**
+| Metafield | Waarde |
+|---|---|
+| `custom.materiaal` | SP: label uit SP_MATERIALS; IB/MC: uit MATERIAL_PLAIN |
+| `custom.maateenheid` | `"cm"` (statisch) |
+| `custom.product_breedte` | breedte in cm (number_decimal) |
+| `custom.product_hoogte` | hoogte in cm (number_decimal) |
+| `mm-google-shopping.condition` | `"new"` |
+| `mm-google-shopping.gender` | `"unisex"` |
+| `mm-google-shopping.age_group` | `"adult"` |
+| `mm-google-shopping.mpn` | `v.sku` |
+
+**`updateShopifyProduct()`** uitgebreid: upsert van alle nieuwe product metafields (`manufacturer`, `modelnaam`, `color_plain`, `google_custom_product`, `material_plain`) en product_information / marketplace_description / long_description / google_description
+
+**Let op**: `custom.google_shopping_description` (oude key) vervangen door `custom.google_description`
+
+### Changes (current session): UI metafields zichtbaar in design detail pagina
+
+**`src/app/designs/[id]/page.tsx`**
+
+**Content tab** — nieuw: "Shopify Metafields (product)" sectie boven de taalkaarten:
+- Toont read-only grid van alle product-niveau metafields die naar Shopify gaan
+- Alleen zichtbaar als NL content beschikbaar is (anders irrelevant)
+- Velden: `custom.manufacturer`, `custom.modelnaam`, `custom.color_plain`, `custom.google_custom_product`, `custom.material`, `custom.material_plain`, `custom.beschrijving_afbeelding`, `custom.product_information`, `custom.marketplace_description`, `custom.long_description`, `custom.google_description`, `global.title_tag`, `global.description_tag`
+- Waarden afgeleid in de component zelf (statische constanten + content velden)
+- Niet-ingevulde velden tonen "— niet ingevuld" in grijs
+
+**Varianten tab** — tabel uitgebreid met Shopify metafield kolommen:
+- Basis kolommen: Type, Maat (mm), SKU, EAN, Prijs, Shopify ID
+- Extra metafield kolommen (visueel gescheiden met border): `materiaal`, `breedte (cm)`, `hoogte (cm)`, `mpn`, `condition/gender/age`
+- Materiaal feed waarde: SP-varianten tonen vertaald label (GLAS→Gehard Glas etc.); IB/MC tonen statisch materiaal
+- Dimensies in cm berekend uit variant `size` veld (mm → cm met 1 decimaal)
+- `minWidth` van tabel vergroot naar 900px; horizontaal scrollbaar
