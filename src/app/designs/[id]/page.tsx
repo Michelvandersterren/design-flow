@@ -1093,49 +1093,31 @@ export default function DesignDetail() {
                   )
                 })()}
 
-                {/* Size-specific mockups per variant */}
+                {/* Size-specific mockups — flat grid */}
                 {(() => {
                   const sized = displayMockups.filter((r) => !!(r as DesignMockup).sizeKey)
                   if (sized.length === 0) return null
                   return (
                     <div>
                       <SectionLabel>Maat-specifieke mockups</SectionLabel>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                        {design.variants.map((v) => {
-                          const vSizeKey = v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, '')
-                          const variantMockups = sized.filter((r) => (r as DesignMockup).sizeKey === vSizeKey)
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                        {sized.map((m) => {
+                          const fileId = (m as DesignMockup).driveFileId || ''
+                          const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
+                          const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
+                          const imgSrc = fileId ? `/api/drive-image/${fileId}` : ''
                           return (
-                            <div key={v.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                                <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{v.productType} — {v.size}</span>
-                                <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{v.sku}</span>
-                              </div>
-                              {variantMockups.length > 0 ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-                                  {variantMockups.map((m) => {
-                                    const fileId = (m as DesignMockup).driveFileId || ''
-                                    const viewUrl = `https://drive.google.com/file/d/${fileId}/view`
-                                    const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
-                                    const imgSrc = fileId ? `/api/drive-image/${fileId}` : ''
-                                    return (
-                                      <MockupCard
-                                        key={m.templateId}
-                                        name={displayName}
-                                        imgSrc={imgSrc}
-                                        altText={(m as DesignMockup).altText || displayName}
-                                        viewUrl={viewUrl}
-                                        isRegenerating={regeneratingMockup === m.templateId}
-                                        canRegenerate={!regeneratingMockup && !generatingMockups}
-                                        onRegenerate={() => regenerateMockup(m.templateId)}
-                                        onLightbox={() => setLightbox({ src: imgSrc, alt: displayName })}
-                                      />
-                                    )
-                                  })}
-                                </div>
-                              ) : (
-                                <p style={{ fontSize: 12, color: '#9ca3af' }}>Geen maat-specifieke mockup voor deze maat.</p>
-                              )}
-                            </div>
+                            <MockupCard
+                              key={m.templateId}
+                              name={displayName}
+                              imgSrc={imgSrc}
+                              altText={(m as DesignMockup).altText || displayName}
+                              viewUrl={viewUrl}
+                              isRegenerating={regeneratingMockup === m.templateId}
+                              canRegenerate={!regeneratingMockup && !generatingMockups}
+                              onRegenerate={() => regenerateMockup(m.templateId)}
+                              onLightbox={() => setLightbox({ src: imgSrc, alt: displayName })}
+                            />
                           )
                         })}
                       </div>
@@ -1573,10 +1555,10 @@ function MockupCard({
           </div>
           {/* Footer */}
           <div style={{ padding: '10px 12px' }}>
-            <p style={{ fontWeight: 600, fontSize: 12, color: '#374151', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
-            {altText && altText !== name && (
-              <p style={{ fontSize: 10, color: '#9ca3af', marginBottom: 6, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{altText}</p>
-            )}
+            <p style={{ fontWeight: 600, fontSize: 12, color: '#374151', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
+            <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={altText}>
+              {altText || <span style={{ color: '#d1d5db' }}>Geen alt-text</span>}
+            </p>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <a
                 href={viewUrl}
