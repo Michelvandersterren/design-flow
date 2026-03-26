@@ -9,6 +9,20 @@ const PRODUCT_MATERIAL: Record<string, string> = {
   SP: 'Aluminium-Dibond matte',
 }
 
+// Plain material label for feeds (Bol.com, Google Shopping etc.)
+const MATERIAL_PLAIN: Record<string, string> = {
+  IB: 'Vinyl',
+  MC: 'Aluminium-Dibond',
+  SP: 'Aluminium-Dibond',
+}
+
+// Dutch product type label for Custom Label 0 in Google Shopping feed
+const PRODUCT_TYPE_CUSTOM_LABEL: Record<string, string> = {
+  IB: 'Inductie Beschermer',
+  MC: 'Muurcirkel',
+  SP: 'Spatscherm',
+}
+
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
@@ -111,24 +125,48 @@ export async function buildShopifyProduct(designId: string) {
     // Build variant metafields
     const variantMetafields: { namespace: string; key: string; value: string; type: string }[] = []
 
+    // Dimensions
     if (v.productType === 'MC') {
-      // MC: diameter in mm
-      variantMetafields.push({ namespace: 'custom', key: 'diameter_mm', value: String(Math.round(Number(v.size))), type: 'number_integer' })
+      variantMetafields.push({ namespace: 'custom', key: 'diameter_mm',    value: String(Math.round(Number(v.size))),  type: 'number_integer' })
     } else {
-      // IB / SP: width + height in mm
       const [wStr, hStr] = v.size.split('x')
-      variantMetafields.push({ namespace: 'custom', key: 'width_mm',  value: String(Math.round(Number(wStr))), type: 'number_integer' })
-      variantMetafields.push({ namespace: 'custom', key: 'height_mm', value: String(Math.round(Number(hStr))), type: 'number_integer' })
+      variantMetafields.push({ namespace: 'custom', key: 'width_mm',       value: String(Math.round(Number(wStr))),    type: 'number_integer' })
+      variantMetafields.push({ namespace: 'custom', key: 'height_mm',      value: String(Math.round(Number(hStr))),    type: 'number_integer' })
     }
 
-    if (v.ean) {
-      variantMetafields.push({ namespace: 'custom', key: 'ean', value: v.ean, type: 'single_line_text_field' })
-    }
-
-    // SP variant: push per-variant material label
+    // Material per variant (SP only — IB/MC have uniform material)
     if (v.productType === 'SP' && v.material) {
-      variantMetafields.push({ namespace: 'custom', key: 'material', value: spMaterialLabel(v.material), type: 'single_line_text_field' })
+      variantMetafields.push({ namespace: 'custom', key: 'materiaal',      value: spMaterialLabel(v.material),         type: 'single_line_text_field' })
+    } else {
+      // IB / MC: static material from MATERIAL_PLAIN
+      const matLabel = MATERIAL_PLAIN[v.productType] ?? ''
+      if (matLabel) variantMetafields.push({ namespace: 'custom', key: 'materiaal', value: matLabel,                   type: 'single_line_text_field' })
     }
+
+    // Unit of measurement
+    variantMetafields.push({ namespace: 'custom', key: 'maateenheid',      value: 'cm',                               type: 'single_line_text_field' })
+
+    // Product dimensions in cm (for feeds / Bol.com)
+    if (v.productType === 'MC') {
+      const diamCm = (Math.round(Number(v.size)) / 10).toString()
+      variantMetafields.push({ namespace: 'custom', key: 'product_hoogte', value: diamCm,                             type: 'number_decimal' })
+      variantMetafields.push({ namespace: 'custom', key: 'product_breedte',value: diamCm,                             type: 'number_decimal' })
+    } else {
+      const [wStr, hStr] = v.size.split('x')
+      variantMetafields.push({ namespace: 'custom', key: 'product_breedte',value: String(Math.round(Number(wStr)) / 10), type: 'number_decimal' })
+      variantMetafields.push({ namespace: 'custom', key: 'product_hoogte', value: String(Math.round(Number(hStr)) / 10), type: 'number_decimal' })
+    }
+
+    // EAN barcode
+    if (v.ean) {
+      variantMetafields.push({ namespace: 'custom', key: 'ean',            value: v.ean,                              type: 'single_line_text_field' })
+    }
+
+    // Google Shopping / feed fields (mm-google-shopping namespace)
+    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'condition',  value: 'new',                        type: 'single_line_text_field' })
+    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'gender',     value: 'unisex',                     type: 'single_line_text_field' })
+    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'age_group',  value: 'adult',                      type: 'single_line_text_field' })
+    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'mpn',        value: v.sku,                        type: 'single_line_text_field' })
 
     return {
       option1,
@@ -180,66 +218,39 @@ export async function buildShopifyProduct(designId: string) {
       variants: shopifyVariants,
       ...(images.length > 0 ? { images } : {}),
       metafields: [
-        {
-          namespace: 'custom',
-          key: 'design_code',
-          value: design.designCode,
-          type: 'single_line_text_field',
-        },
-        {
-          namespace: 'custom',
-          key: 'product_type',
-          value: firstType ?? '',
-          type: 'single_line_text_field',
-        },
+        { namespace: 'custom', key: 'design_code',          value: design.designCode,                               type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'product_type',         value: firstType ?? '',                                 type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'manufacturer',         value: 'probo',                                         type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'modelnaam',            value: design.designName,                               type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'color_plain',          value: 'Full-colour',                                   type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'google_custom_product',value: 'True',                                          type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'induction_compatible', value: String(design.inductionFriendly ?? false),       type: 'single_line_text_field' },
         ...(firstType && PRODUCT_MATERIAL[firstType]
-          ? [{ namespace: 'custom', key: 'material', value: PRODUCT_MATERIAL[firstType], type: 'single_line_text_field' }]
+          ? [{ namespace: 'custom', key: 'material',        value: PRODUCT_MATERIAL[firstType],                     type: 'single_line_text_field' }]
           : []),
-        {
-          namespace: 'custom',
-          key: 'induction_compatible',
-          value: String(design.inductionFriendly ?? false),
-          type: 'single_line_text_field',
-        },
+        ...(firstType && MATERIAL_PLAIN[firstType]
+          ? [{ namespace: 'custom', key: 'material_plain',  value: MATERIAL_PLAIN[firstType],                       type: 'single_line_text_field' }]
+          : []),
+        ...(design.mockups?.[0]?.driveFileId
+          ? [{ namespace: 'custom', key: 'beschrijving_afbeelding', value: design.mockups[0].driveFileId,           type: 'single_line_text_field' }]
+          : []),
+        ...(nlContent.description
+          ? [{ namespace: 'custom', key: 'product_information',    value: nlContent.description,                    type: 'multi_line_text_field' }]
+          : []),
+        ...(nlContent.description
+          ? [{ namespace: 'custom', key: 'marketplace_description', value: toBodyHtml(nlContent.description),       type: 'multi_line_text_field' }]
+          : []),
         ...(nlContent.longDescription
-          ? [
-              {
-                namespace: 'custom',
-                key: 'long_description',
-                value: toBodyHtml(nlContent.longDescription),
-                type: 'multi_line_text_field',
-              },
-            ]
-          : []),
-        ...(nlContent.seoTitle
-          ? [
-              {
-                namespace: 'global',
-                key: 'title_tag',
-                value: nlContent.seoTitle,
-                type: 'single_line_text_field',
-              },
-            ]
-          : []),
-        ...(nlContent.seoDescription
-          ? [
-              {
-                namespace: 'global',
-                key: 'description_tag',
-                value: nlContent.seoDescription,
-                type: 'single_line_text_field',
-              },
-            ]
+          ? [{ namespace: 'custom', key: 'long_description',       value: toBodyHtml(nlContent.longDescription),    type: 'multi_line_text_field' }]
           : []),
         ...(nlContent.googleShoppingDescription
-          ? [
-              {
-                namespace: 'custom',
-                key: 'google_shopping_description',
-                value: nlContent.googleShoppingDescription,
-                type: 'single_line_text_field',
-              },
-            ]
+          ? [{ namespace: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription,      type: 'single_line_text_field' }]
+          : []),
+        ...(nlContent.seoTitle
+          ? [{ namespace: 'global', key: 'title_tag',              value: nlContent.seoTitle,                       type: 'single_line_text_field' }]
+          : []),
+        ...(nlContent.seoDescription
+          ? [{ namespace: 'global', key: 'description_tag',        value: nlContent.seoDescription,                 type: 'single_line_text_field' }]
           : []),
       ],
     },
@@ -380,27 +391,38 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
     }
   }
 
-  // 3. Upsert product-type metafields
+  // 3. Upsert static product metafields
+  await upsertMetafield('custom', 'manufacturer',          'probo',                                           'single_line_text_field')
+  await upsertMetafield('custom', 'modelnaam',             design.designName,                                 'single_line_text_field')
+  await upsertMetafield('custom', 'color_plain',           'Full-colour',                                     'single_line_text_field')
+  await upsertMetafield('custom', 'google_custom_product', 'True',                                            'single_line_text_field')
+  await upsertMetafield('custom', 'induction_compatible',  String(design.inductionFriendly ?? false),         'single_line_text_field')
   if (firstType) {
     await upsertMetafield('custom', 'product_type', firstType, 'single_line_text_field')
     if (PRODUCT_MATERIAL[firstType]) {
-      await upsertMetafield('custom', 'material', PRODUCT_MATERIAL[firstType], 'single_line_text_field')
+      await upsertMetafield('custom', 'material',       PRODUCT_MATERIAL[firstType], 'single_line_text_field')
+    }
+    if (MATERIAL_PLAIN[firstType]) {
+      await upsertMetafield('custom', 'material_plain', MATERIAL_PLAIN[firstType],   'single_line_text_field')
     }
   }
-  await upsertMetafield('custom', 'induction_compatible', String(design.inductionFriendly ?? false), 'single_line_text_field')
 
   // 4. Upsert all content metafields
+  if (nlContent.description) {
+    await upsertMetafield('custom', 'product_information',    nlContent.description,                          'multi_line_text_field')
+    await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.description),             'multi_line_text_field')
+  }
   if (nlContent.longDescription) {
-    await upsertMetafield('custom', 'long_description', toBodyHtml(nlContent.longDescription), 'multi_line_text_field')
-  }
-  if (nlContent.seoTitle) {
-    await upsertMetafield('global', 'title_tag', nlContent.seoTitle, 'single_line_text_field')
-  }
-  if (nlContent.seoDescription) {
-    await upsertMetafield('global', 'description_tag', nlContent.seoDescription, 'single_line_text_field')
+    await upsertMetafield('custom', 'long_description',       toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
   }
   if (nlContent.googleShoppingDescription) {
-    await upsertMetafield('custom', 'google_shopping_description', nlContent.googleShoppingDescription, 'single_line_text_field')
+    await upsertMetafield('custom', 'google_description',     nlContent.googleShoppingDescription,            'single_line_text_field')
+  }
+  if (nlContent.seoTitle) {
+    await upsertMetafield('global', 'title_tag',              nlContent.seoTitle,                             'single_line_text_field')
+  }
+  if (nlContent.seoDescription) {
+    await upsertMetafield('global', 'description_tag',        nlContent.seoDescription,                       'single_line_text_field')
   }
 
   return { shopifyProductId, updated: true }
