@@ -622,7 +622,7 @@ export default function DesignDetail() {
           {/* Back + title row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button
-              onClick={() => router.push('/')}
+              onClick={() => { if (window.history.length > 1) { router.back() } else { router.push('/') } }}
               className="btn btn-secondary"
               style={{ fontSize: 12, padding: '5px 12px', flexShrink: 0 }}
             >
