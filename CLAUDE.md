@@ -517,3 +517,47 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - SP/MC PDFs bevatten alleen afbeelding + bleed (geen CutContour)
 - Doc-comment bijgewerkt: "CutContour (IB only)" + SP/MC spec vermeld
 - `buildAndUploadPrintFile()`: geeft `productType` door aan `buildPrintPdf()`
+
+---
+
+## EAN Codes — Architectuur & GS1 Inventarisatie (2026-03-26)
+
+### Huidige implementatie
+
+| Bestand | Rol |
+|---|---|
+| `src/lib/ean.ts` | Core EAN logica: check-digit berekening, validatie, sequentiële generatie, bulk-assign |
+| `src/lib/variants.ts` | EAN wordt toegewezen bij aanmaken van elke variant (IB/SP/MC) |
+| `src/app/api/ean/assign/route.ts` | REST API: `POST /api/ean/assign` (vul ontbrekende EANs), `GET` (preview hoeveel ontbreken) |
+| `src/lib/shopify.ts` | EAN naar Shopify als `barcode` veld + metafield `custom.ean` |
+| `prisma/schema.prisma` | `Variant.ean String?` met index |
+
+**EAN generatie algoritme** (`src/lib/ean.ts`):
+- GS1 bedrijfsprefix KitchenArt: **`8721476`** (hardcoded als seed `8721476881239`)
+- Strategie: hoogste bestaande EAN in DB ophalen → +1 → check-digit herberekenen
+- Volledig offline/lokaal — geen API-aanroep naar GS1 nodig
+
+**EAN toewijzing**: bij `generateSpVariants()`, `generateIbVariants()`, `generateMcVariants()` — elke variant krijgt direct een EAN via `await generateNextEan()`.
+
+### GS1 EAN aanvragen: inventarisatie
+
+**Conclusie: GS1 biedt geen API voor het aanvragen van nieuwe EAN-codes.**
+
+| Vraag | Antwoord |
+|---|---|
+| Heeft GS1 een API voor EAN-toewijzing? | **Nee.** GS1 API's zijn alleen voor *opzoeken* van bestaande codes (Verified by GS1, GS1 US Data Hub). Geen toewijzing via API. |
+| Hoe werkt het GS1 model? | Je koopt een **bedrijfsprefix** bij GS1 NL. Daarna wijs jij zelf productnummers toe. Volledig automatiseerbaar in code. |
+| Zijn er third-party EAN resellers? | Ja, maar **niet aanbevolen** — codes staan op naam van de reseller, niet van KitchenArt. Amazon/bol.com controleren dit via GS1 registry. |
+| Wat kost GS1 NL lidmaatschap? | ~€100–300/jaar voor een 7-cijferig prefix (100.000 EAN-nummers capaciteit). Eenmalige setup. |
+
+**KitchenArt heeft al een GS1 bedrijfsprefix** (`8721476`) — dit betekent dat de huidige implementatie volledig GS1-compliant is. Er is **geen actie vereist** om EAN-aanvraag te automatiseren: de generatie is al volledig geautomatiseerd en offline.
+
+### Wat is er nodig voor EAN-automatisering?
+
+**Niets nieuws** — het werkt al:
+1. GS1 prefix `8721476` is in gebruik
+2. `generateNextEan()` genereert sequentieel, volledig in-process
+3. Elke nieuwe variant krijgt automatisch een EAN bij `generateVariants()`
+4. Backfill via `POST /api/ean/assign` voor ontbrekende EANs
+
+**Enige optionele verbetering**: EAN-nummers registreren in de GS1 online portal (gs1.nl) zodat ze ook verschijnen in "Verified by GS1" lookups. Dit is een handmatige stap, of te automatiseren via CSV-upload op gs1.nl (geen API beschikbaar). Voor KitchenArt's huidige schaal is dit niet urgent.
