@@ -6,8 +6,9 @@
  *   - Pagina = MediaBox = BleedBox = TrimBox = (productW + 20mm) × (productH + 20mm)
  *   - ArtBox = productrand (10mm inset van MediaBox)
  *   - Design afbeelding: cover-scaled, geplaatst op volledige pagina, 150 dpi downsampled, lossless PNG
- *   - CutContour: rounded rect, 10mm inset, 5mm corner radius, spot color "Cutcontour"
+ *   - CutContour (IB only): rounded rect, 10mm inset, 5mm corner radius, spot color "Cutcontour"
  *     (0C 100M 0Y 0K), 0.25pt stroke, overprint ON
+ *   - SP/MC: geen CutContour — alleen afbeelding met bleed
  *   - Spot color naam: "Cutcontour" (lowercase c — exact zoals in Probo reference PDF)
  *   - PDF 1.7 compatibel
  *   - FOGRA39 CMYK ICC profiel ingebed
@@ -149,7 +150,7 @@ async function buildAndUploadPrintFile(
   const fileName = buildPrintFileName(productType, designCode, tmpl.widthMM, tmpl.heightMM)
 
   try {
-    const pdfBuffer = await buildPrintPdf(designBuffer, tmpl.widthMM, tmpl.heightMM)
+    const pdfBuffer = await buildPrintPdf(designBuffer, tmpl.widthMM, tmpl.heightMM, productType)
     const uploaded  = await uploadPrintFileToDrive(pdfBuffer, fileName, designCode)
 
     await prisma.designPrintFile.deleteMany({ where: { designId, sizeKey: tmpl.sizeKey } })
@@ -199,9 +200,10 @@ async function buildAndUploadPrintFile(
  *
  * Lagen (onderaan → boven):
  *   1. Design-afbeelding: cover-scaled, 150 dpi downgesampled, lossless PNG
- *   2. CutContour: rounded rect, 10mm inset, 5mm radius, spot "Cutcontour", overprint ON
+ *   2. CutContour (IB only): rounded rect, 10mm inset, 5mm radius, spot "Cutcontour", overprint ON
+ *      SP/MC: geen CutContour — alleen afbeelding met bleed
  */
-async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: number): Promise<Buffer> {
+async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: number, productType: string): Promise<Buffer> {
   // Paginaformaat in punten (product + bleed)
   const pageW_pt = (widthMM  + 2 * BLEED_MM) * MM_TO_PT
   const pageH_pt = (heightMM + 2 * BLEED_MM) * MM_TO_PT
@@ -231,9 +233,11 @@ async function buildPrintPdf(designBuffer: Buffer, widthMM: number, heightMM: nu
     height: pageH_pt,
   })
 
-  // ── 2. CutContour spot color laag ────────────────────────────────────
+  // ── 2. CutContour spot color laag (IB only) ──────────────────────────
 
-  addCutContourSpotColor(doc, page, pageW_pt, pageH_pt)
+  if (productType === 'IB') {
+    addCutContourSpotColor(doc, page, pageW_pt, pageH_pt)
+  }
 
   // ── 3. Boxes: TrimBox en ArtBox (10mm inset) ─────────────────────────
 
