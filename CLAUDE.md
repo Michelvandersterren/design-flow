@@ -483,3 +483,28 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - Shopify REST API accepteert `metafields` array direct op elk variant-object in de product creation payload
 - Variant size format: IB/SP = `"520x350"` (B×H in mm), MC = `"600"` (diameter in mm)
 - SP material labels komen uit `SP_MATERIALS` in `constants.ts`: G = Glas, BH0 = Brushed, BH4 = Brushed + 4mm
+
+---
+
+## Session — 2026-03-26: Printbestanden SP en MC
+
+### Changes committed (2bdd912): Add SP and MC print file support
+
+**`src/lib/print-config.ts`**
+- `PRINT_BASE` constante hernoemd naar `IB_PRINT_BASE`
+- `SP_PRINT_TEMPLATES` toegevoegd: 12 maten conform `SP_SIZES` in `constants.ts`, sizeKey = `"{width}x{height}"` (bijv. `"600x300"`)
+- `MC_PRINT_TEMPLATES` toegevoegd: 4 diameters (400/600/800/1000mm), sizeKey = diameter als string (bijv. `"600"`), widthMM = heightMM = diameter
+- `getPrintTemplateForSize()`: SP en MC branches toegevoegd
+- `getAllPrintTemplates()`: SP en MC branches toegevoegd
+- `buildPrintFileName()`: MC krijgt apart formaat zonder hoogte — `mc-{code}-{diameter}.pdf`
+- Doc-comment bijgewerkt met SP/MC spec
+
+**`src/lib/print.ts`**
+- `generateAllPrintFilesForDesign()`: IB-only guard verwijderd; gebruikt nu `getPrintTemplateForSize(productType, sizeKey)` — werkt voor IB/SP/MC
+- SP deduplicatie: meerdere variants per maat (G/BH0/BH4) worden automatisch gereduceerd tot unieke sizeKeys
+- `regenerateSinglePrintFile()`: `getPrintTemplateForSize('IB', ...)` → `getPrintTemplateForSize(productType, ...)`; foutmelding toont nu ook productType
+
+### Architecture notes
+- SP: één PDF per unieke maat (G/BH0/BH4 materiaalvarianten delen hetzelfde printbestand — materiaal beïnvloedt alleen boorgaten/ophanging, niet het printoppervlak)
+- MC: geen cirkel-CutContour — zelfde afgeronde rechthoek als IB/SP; widthMM = heightMM = diameter
+- SP/MC `psdPath` veld is leeg string `""` (geen PSD-bestanden nodig — PDF wordt puur via pdf-lib gegenereerd)
