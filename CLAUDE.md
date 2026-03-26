@@ -721,3 +721,37 @@ Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.market
 | `global.title_tag` | `content.seoTitle` |
 | `global.description_tag` | `content.seoDescription` |
 | `custom.google_description` | `content.googleShoppingDescription` |
+
+---
+
+## Session — 2026-03-26 (vervolg): Terug-knop fix + pdf-lib corrupt node_modules
+
+### Changes committed (c9cfab4): Terug-knop + pdf-lib lazy import
+
+**`src/app/designs/[id]/page.tsx`**
+- "← Terug" knop gebruikte `router.push('/')` — vervangen door `router.back()` met `router.push('/')` als fallback als `window.history.length <= 1`
+- Root cause van "knop doet niets": de 500 op `/api/designs/[id]/printfile` voorkwam dat de pagina correct hydreerde, waardoor alle `onClick` handlers inactief bleven
+
+**`src/lib/print.ts`**
+- Tijdelijk: `pdf-lib` top-level import vervangen door `await import('pdf-lib')` in `buildPrintPdf()` als workaround voor Turbopack crash
+- Later teruggedraaid (zie c9cfab4 → 5bd87ca)
+
+### Changes committed (5bd87ca): pdf-lib corrupt node_modules fix
+
+**Root cause**: `node_modules/pdf-lib/cjs/core/embedders/CustomFontEmbedder.js` en andere embedder bestanden ontbraken — corrupte installatie. Dit veroorzaakte `Cannot convert undefined or null to object` bij elke `require('pdf-lib')`, ook via dynamische import.
+
+**Fix**: `npm remove pdf-lib && npm install pdf-lib` — schone herinstallatie. Daarna:
+- Top-level import hersteld in `src/lib/print.ts`
+- `addCutContourSpotColor()` signatuur terug naar normaal (geen doorgegeven types meer)
+- `package.json` + `package-lock.json` gecommit met correcte pdf-lib installatie
+
+### Diagnose-aanpak
+1. `curl` op endpoint → exacte foutmelding in HTML response zichtbaar
+2. `node -e "require('pdf-lib')"` hangt → package zelf kapot
+3. `ls node_modules/pdf-lib/cjs/core/embedders/` → `CustomFontEmbedder.js` ontbreekt
+4. `npm remove pdf-lib && npm install pdf-lib` → opgelost
+
+### Architectuurnotities
+- `pdf-lib` in `serverExternalPackages` (next.config.js) is correct en moet blijven staan
+- Turbopack bundelt `pdf-lib` niet zelf — Node laadt het als external module
+- Als `pdf-lib` ooit opnieuw crasht: check eerst of `node_modules/pdf-lib/cjs/core/embedders/` volledig is
