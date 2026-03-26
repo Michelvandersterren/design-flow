@@ -593,6 +593,7 @@ export default function DesignDetail() {
       : savedMockups.map((m) => ({ ...m, isNew: false }))
 
   const hasIB = design.variants.some((v) => v.productType === 'IB')
+  const hasPrintVariants = design.variants.some((v) => v.productType === 'IB' || v.productType === 'SP' || v.productType === 'MC')
 
   // Tab badge counts
   const tabBadges: Partial<Record<TabId, number>> = {
@@ -907,8 +908,8 @@ export default function DesignDetail() {
                     </button>
                   </ActionRow>
 
-                  {/* Stap 4: Printbestanden (alleen IB) */}
-                  {hasIB && (
+                  {/* Stap 4: Printbestanden */}
+                  {hasPrintVariants && (
                     <ActionRow
                       label="Printbestanden"
                       status={savedPrintFiles.length > 0 ? `${savedPrintFiles.length} PDF's klaar` : undefined}
@@ -1148,17 +1149,17 @@ export default function DesignDetail() {
                 <button
                   className="btn btn-primary"
                   onClick={generatePrintFiles}
-                  disabled={generatingPrintFiles || !design.driveFileId || !hasIB}
+                  disabled={generatingPrintFiles || !design.driveFileId || !hasPrintVariants}
                 >
                   {generatingPrintFiles ? 'Genereren...' : savedPrintFiles.length > 0 ? 'Opnieuw genereren' : 'Genereer printbestanden'}
                 </button>
               </div>
             </div>
 
-            {!hasIB && (
-              <DisabledHint>Printbestanden zijn alleen beschikbaar voor Inductiebeschermer (IB) varianten.</DisabledHint>
+            {!hasPrintVariants && (
+              <DisabledHint>Genereer eerst varianten (IB, SP of MC) voordat je printbestanden kunt aanmaken.</DisabledHint>
             )}
-            {hasIB && !design.driveFileId && (
+            {hasPrintVariants && !design.driveFileId && (
               <DisabledHint>Upload eerst een designbestand voordat je printbestanden kunt genereren.</DisabledHint>
             )}
 
