@@ -577,3 +577,16 @@ GS1_SUBSCRIPTION_KEY=        # Ocp-Apim-Subscription-Key — nog toe te voegen a
 3. Daarna opnieuw `POST /api/ean/gs1-sync` draaien om alle 300 bestaande EANs te registreren
 
 **Accountnummer**: `87214768` (bedrijfsnummer MijnGS1) — werkt, OAuth2 token wordt succesvol opgehaald. Onduidelijk of het 13-cijferig formaat vereist is; testen na subscription key fix.
+
+---
+
+## Session — 2026-03-26 (vervolg): MockupCard footer alt-text fix
+
+### Changes committed (9b93e6e): Fix MockupCard alt-text altijd tonen in footer
+
+**`src/app/designs/[id]/page.tsx`** (MockupCard footer, ~regel 1558)
+- Alt-text wordt nu **altijd** getoond onder de mockup naam — ook als leeg
+- Lege alt-text toont `Geen alt-text` in lichtgrijs (`#d1d5db`)
+- Font-size verhoogd van 10px → 11px; kleur van `#9ca3af` → `#6b7280` (meer contrast)
+- Italic stijl verwijderd; `title` attribuut toegevoegd (full tekst bij hover op ellipsis)
+- Conditional `{altText && altText !== name && ...}` vervangen door onvoorwaardelijke render
