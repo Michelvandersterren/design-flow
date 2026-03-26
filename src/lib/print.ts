@@ -59,19 +59,15 @@ export async function generateAllPrintFilesForDesign(designId: string): Promise<
 
   const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
   if (!productType) throw new Error('Geen producttype gevonden — genereer eerst varianten')
-  if (productType !== 'IB') {
-    return [{ sizeKey: '', widthMM: 0, heightMM: 0, driveFileId: '', driveUrl: '', fileName: '',
-      skipped: true, skipReason: `Printbestanden nog niet ondersteund voor ${productType}` }]
-  }
 
-  // Unieke sizeKeys
+  // Unieke sizeKeys — SP heeft meerdere variants per maat (G/BH0/BH4), dedupliceer
   const variantSizeKeys = [...new Set(
     design.variants.map((v) => v.size.replace(/\s*mm\s*/i, '').replace(/\s+/g, ''))
   )]
 
   const templates: PrintTemplate[] = []
   for (const sizeKey of variantSizeKeys) {
-    const tmpl = getPrintTemplateForSize('IB', sizeKey)
+    const tmpl = getPrintTemplateForSize(productType, sizeKey)
     if (tmpl) templates.push(tmpl)
   }
 
@@ -123,8 +119,8 @@ export async function regenerateSinglePrintFile(
   const productType = (design.variants[0]?.productType ?? design.designType) as 'IB' | 'SP' | 'MC' | undefined
   if (!productType) throw new Error('Geen producttype gevonden')
 
-  const tmpl = getPrintTemplateForSize('IB', sizeKey)
-  if (!tmpl) throw new Error(`Geen print template gevonden voor sizeKey: ${sizeKey}`)
+  const tmpl = getPrintTemplateForSize(productType, sizeKey)
+  if (!tmpl) throw new Error(`Geen print template gevonden voor ${productType} sizeKey: ${sizeKey}`)
 
   const designBuffer = await getDesignImageBuffer(design.driveFileId)
   return buildAndUploadPrintFile(designId, productType, design.designCode, tmpl, designBuffer)
