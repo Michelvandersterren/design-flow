@@ -1534,7 +1534,7 @@ function MockupCard({
             onClick={onLightbox}
           >
             <img
-              src={imgSrc}
+              src={imgSrc || undefined}
               alt={altText}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={(e) => {
