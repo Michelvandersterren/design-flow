@@ -8,6 +8,10 @@ export const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ''
 export const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
 export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
 export const GS1_API_KEY = process.env.GS1_API_KEY || ''
+export const GS1_CLIENT_ID = process.env.GS1_CLIENT_ID || ''
+export const GS1_CLIENT_SECRET = process.env.GS1_CLIENT_SECRET || ''
+export const GS1_ACCOUNT_NUMBER = process.env.GS1_ACCOUNT_NUMBER || ''
+export const GS1_CONTRACT_NUMBER = process.env.GS1_CONTRACT_NUMBER || ''
 
 export const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || ''
 export const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n')

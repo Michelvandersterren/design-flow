@@ -79,6 +79,7 @@ design-flow/
 - `productType`: IB | MC | SP
 - `sku`: e.g. `IB-CALMM-520-350`
 - `ean`: EAN-13 barcode
+- `gs1Registered`: Boolean — true when EAN is registered with GS1 NL Verified by GS1
 - `size`, `material`, `price`, `weight`
 - `shopifyProductId`, `shopifyVariantId`
 
@@ -520,44 +521,47 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 ---
 
-## EAN Codes — Architectuur & GS1 Inventarisatie (2026-03-26)
+## EAN Codes — Architectuur & GS1 Integratie (bijgewerkt 2026-03-26)
 
 ### Huidige implementatie
 
 | Bestand | Rol |
 |---|---|
 | `src/lib/ean.ts` | Core EAN logica: check-digit berekening, validatie, sequentiële generatie, bulk-assign |
-| `src/lib/variants.ts` | EAN wordt toegewezen bij aanmaken van elke variant (IB/SP/MC) |
+| `src/lib/gs1.ts` | GS1 NL OAuth2 token ophalen + `registerGtin()` functie |
+| `src/lib/variants.ts` | EAN wordt toegewezen + GS1 registratie gestart bij aanmaken van elke variant (IB/SP/MC) |
 | `src/app/api/ean/assign/route.ts` | REST API: `POST /api/ean/assign` (vul ontbrekende EANs), `GET` (preview hoeveel ontbreken) |
+| `src/app/api/ean/gs1-sync/route.ts` | `POST /api/ean/gs1-sync` — backfill: registreert alle bestaande EANs met `gs1Registered=false` |
 | `src/lib/shopify.ts` | EAN naar Shopify als `barcode` veld + metafield `custom.ean` |
-| `prisma/schema.prisma` | `Variant.ean String?` met index |
+| `prisma/schema.prisma` | `Variant.ean String?` + `Variant.gs1Registered Boolean @default(false)` |
 
 **EAN generatie algoritme** (`src/lib/ean.ts`):
 - GS1 bedrijfsprefix KitchenArt: **`8721476`** (hardcoded als seed `8721476881239`)
 - Strategie: hoogste bestaande EAN in DB ophalen → +1 → check-digit herberekenen
-- Volledig offline/lokaal — geen API-aanroep naar GS1 nodig
+- Volledig offline/lokaal — GS1 API is alleen voor *registratie*, niet voor generatie
 
-**EAN toewijzing**: bij `generateSpVariants()`, `generateIbVariants()`, `generateMcVariants()` — elke variant krijgt direct een EAN via `await generateNextEan()`.
+**EAN toewijzing + registratie**: bij `generateSpVariants()`, `generateIbVariants()`, `generateMcVariants()` — elke variant krijgt direct een EAN via `await generateNextEan()`, daarna wordt `registerGtin()` non-fatal aangeroepen.
 
-### GS1 EAN aanvragen: inventarisatie
+### GS1 NL API integratie
 
-**Conclusie: GS1 biedt geen API voor het aanvragen van nieuwe EAN-codes.**
+**Authorization API** (`https://gs1nl-api-acc.gs1.nl/authorization/token`):
+- `POST` met `client_id` en `client_secret` als **headers** (niet body)
+- Geeft `{ access_token, expires_in, token_type, scope }`
+- Token wordt gecached in memory tot verloopdatum (minus 60s buffer)
 
-| Vraag | Antwoord |
-|---|---|
-| Heeft GS1 een API voor EAN-toewijzing? | **Nee.** GS1 API's zijn alleen voor *opzoeken* van bestaande codes (Verified by GS1, GS1 US Data Hub). Geen toewijzing via API. |
-| Hoe werkt het GS1 model? | Je koopt een **bedrijfsprefix** bij GS1 NL. Daarna wijs jij zelf productnummers toe. Volledig automatiseerbaar in code. |
-| Zijn er third-party EAN resellers? | Ja, maar **niet aanbevolen** — codes staan op naam van de reseller, niet van KitchenArt. Amazon/bol.com controleren dit via GS1 registry. |
-| Wat kost GS1 NL lidmaatschap? | ~€100–300/jaar voor een 7-cijferig prefix (100.000 EAN-nummers capaciteit). Eenmalige setup. |
+**GTIN Registration API** (`https://gs1nl-api-acc.gs1.nl/gtin-registration-api/RegistrateGtinProducts`):
+- `POST` met Bearer token + JSON body
+- Asynchroon (bulk) proces — we sturen per variant, fire-and-forget
+- Verplichte velden: `accountnumber`, `Gtin`, `Status`, `Gpc`, `ConsumerUnit`, `PackagingType`, `TargetMarketCountry`, `Description`, `Language`, `BrandName`, `ContractNumber`
 
-**KitchenArt heeft al een GS1 bedrijfsprefix** (`8721476`) — dit betekent dat de huidige implementatie volledig GS1-compliant is. Er is **geen actie vereist** om EAN-aanvraag te automatiseren: de generatie is al volledig geautomatiseerd en offline.
+**Env vars** (in `.env`, nooit committen):
+```
+GS1_CLIENT_ID=               # sandbox client ID uit GS1 developer portal
+GS1_CLIENT_SECRET=           # sandbox client secret uit GS1 developer portal
+GS1_ACCOUNT_NUMBER=          # 13-cijferig accountnummer uit MijnGS1
+GS1_CONTRACT_NUMBER=         # Contractnummer uit MijnGS1 > Company > Contracts
+```
 
-### Wat is er nodig voor EAN-automatisering?
+**Non-fatal gedrag**: als `GS1_ACCOUNT_NUMBER` leeg is (dev/CI) skip de registratie stil. Als de API-aanroep faalt → `console.warn`, variant-aanmaak gaat door, `gs1Registered` blijft `false`.
 
-**Niets nieuws** — het werkt al:
-1. GS1 prefix `8721476` is in gebruik
-2. `generateNextEan()` genereert sequentieel, volledig in-process
-3. Elke nieuwe variant krijgt automatisch een EAN bij `generateVariants()`
-4. Backfill via `POST /api/ean/assign` voor ontbrekende EANs
-
-**Enige optionele verbetering**: EAN-nummers registreren in de GS1 online portal (gs1.nl) zodat ze ook verschijnen in "Verified by GS1" lookups. Dit is een handmatige stap, of te automatiseren via CSV-upload op gs1.nl (geen API beschikbaar). Voor KitchenArt's huidige schaal is dit niet urgent.
+**Backfill bestaande EANs**: `POST /api/ean/gs1-sync` — idempotent, verwerkt alles met `gs1Registered=false`.

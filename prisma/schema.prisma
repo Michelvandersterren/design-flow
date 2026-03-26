@@ -42,6 +42,7 @@ model Variant {
   size             String
   sku              String   @unique
   ean              String?
+  gs1Registered    Boolean  @default(false)
   shopifyProductId String?
   shopifyVariantId String?
   price            Float?

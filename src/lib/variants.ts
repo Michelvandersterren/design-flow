@@ -1,6 +1,22 @@
 import { prisma } from './prisma'
 import { IB_SIZES, MC_SIZES, SP_SIZES, SP_MATERIALS, PRODUCT_SKU_PREFIX } from './constants'
 import { generateNextEan } from './ean'
+import { registerGtin } from './gs1'
+
+/**
+ * Helper: attempt GS1 registration and update the DB flag.
+ * Always non-fatal — logs a warning on failure.
+ */
+async function tryRegisterGtin(variantId: string, ean: string, description: string) {
+  try {
+    const registered = await registerGtin({ gtin: ean, description, brandName: 'Splash & Grab' })
+    if (registered) {
+      await prisma.variant.update({ where: { id: variantId }, data: { gs1Registered: true } })
+    }
+  } catch (err) {
+    console.warn(`[GS1] registration failed for EAN ${ean}:`, err)
+  }
+}
 
 /**
  * Generate the SKU for an IB variant.
@@ -62,6 +78,11 @@ export async function generateSpVariants(designId: string, designCode: string) {
           weight: size.weightGrams / 1000, // store in kg
         },
       })
+
+      if (variant.ean) {
+        await tryRegisterGtin(variant.id, variant.ean, `Spatscherm ${size.width}x${size.height}mm ${mat.code}`)
+      }
+
       created.push(variant)
     }
   }
@@ -98,6 +119,11 @@ export async function generateIbVariants(designId: string, designCode: string) {
         weight: size.weightGrams / 1000, // store in kg
       },
     })
+
+    if (variant.ean) {
+      await tryRegisterGtin(variant.id, variant.ean, `Inductieplaat ${size.width}x${size.height}mm`)
+    }
+
     created.push(variant)
   }
 
@@ -132,6 +158,11 @@ export async function generateMcVariants(designId: string, designCode: string) {
         weight: size.weightGrams / 1000,
       },
     })
+
+    if (variant.ean) {
+      await tryRegisterGtin(variant.id, variant.ean, `Magnetische cirkel ${size.diameter}mm`)
+    }
+
     created.push(variant)
   }
 
