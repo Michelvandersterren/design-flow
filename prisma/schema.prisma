@@ -8,21 +8,21 @@ datasource db {
 }
 
 model Design {
-  id                String         @id @default(cuid())
-  notionId          String?        @unique
-  designCode        String         @unique
+  id                String            @id @default(cuid())
+  notionId          String?           @unique
+  designCode        String            @unique
   designName        String
   designType        String?
   styleFamily       String?
   collections       String?
   colorTags         String?
-  inductionFriendly Boolean        @default(false)
-  circleFriendly    Boolean        @default(false)
-  splashFriendly    Boolean        @default(false)
+  inductionFriendly Boolean           @default(false)
+  circleFriendly    Boolean           @default(false)
+  splashFriendly    Boolean           @default(false)
   notionData        String?
-  status            String         @default("DRAFT")
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  status            String            @default("DRAFT")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
   driveFileId       String?
   driveFileName     String?
   content           Content[]
@@ -64,15 +64,15 @@ model Content {
   designId                  String
   language                  String
   description               String?
-  longDescription           String?
   altText                   String?
   seoTitle                  String?
   seoDescription            String?
-  googleShoppingDescription String?
   translatedFrom            String?
   translationStatus         String   @default("PENDING")
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
+  longDescription           String?
+  googleShoppingDescription String?
   design                    Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
   @@unique([designId, language])
@@ -110,17 +110,16 @@ model DesignMockup {
   @@index([designId])
 }
 
-// Stores every generated print PDF per design variant size
 model DesignPrintFile {
   id          String   @id @default(cuid())
   designId    String
-  productType String   // IB | SP | MC
-  sizeKey     String   // e.g. "520x350"
+  productType String
+  sizeKey     String
   widthMM     Int
   heightMM    Int
-  fileName    String   // e.g. "ib-soazb-520-350.pdf"
+  fileName    String
   driveFileId String
-  driveUrl    String   // webViewLink — direct link to open/download in Drive
+  driveUrl    String
   createdAt   DateTime @default(now())
   design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 

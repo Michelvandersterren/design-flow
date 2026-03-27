@@ -31,14 +31,6 @@ interface BulkPublishResult {
   results: BulkPublishStepResult[]
 }
 
-interface StyleFamilyResult {
-  success: boolean
-  total: number
-  assigned: number
-  notionErrors: number
-  families: { family: string; count: number }[]
-}
-
 interface BulkStepResult {
   step: string
   status: 'ok' | 'skipped' | 'error'
@@ -82,8 +74,6 @@ export default function Dashboard() {
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const [bulkPublishRunning, setBulkPublishRunning] = useState(false)
   const [bulkPublishResult, setBulkPublishResult] = useState<BulkPublishResult | null>(null)
-  const [styleFamiliesRunning, setStyleFamiliesRunning] = useState(false)
-  const [styleFamiliesResult, setStyleFamiliesResult] = useState<StyleFamilyResult | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
@@ -175,31 +165,6 @@ export default function Dashboard() {
     }
   }
 
-  const runStyleFamilies = async (overwrite = false) => {
-    const noFamilyCount = designs.filter((d) => !(d as any).styleFamily).length
-    const confirmMsg = overwrite
-      ? `Stijlfamilies opnieuw toewijzen voor ALLE ${designs.length} designs?\n\nBestaande stijlfamilies worden overschreven en teruggeschreven naar Notion.`
-      : `Stijlfamilies automatisch toewijzen voor ${noFamilyCount} designs zonder familie?\n\nDesigns met al een stijlfamilie worden overgeslagen. Resultaat wordt teruggeschreven naar Notion.`
-    if (!confirm(confirmMsg)) return
-
-    setStyleFamiliesRunning(true)
-    setStyleFamiliesResult(null)
-    try {
-      const res = await fetch('/api/designs/style-families', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overwrite, notionSync: true }),
-      })
-      const data = await res.json()
-      setStyleFamiliesResult(data)
-      await fetchDesigns()
-    } catch {
-      alert('Stijlfamilies genereren mislukt')
-    } finally {
-      setStyleFamiliesRunning(false)
-    }
-  }
-
   const stats = {
     total: designs.length,
     draft: designs.filter((d) => d.status === 'DRAFT').length,
@@ -263,14 +228,9 @@ export default function Dashboard() {
                   : `Publiceer ${stats.approved} naar Shopify`}
               </button>
             )}
-            <button
-              className="btn btn-secondary"
-              onClick={() => runStyleFamilies(false)}
-              disabled={styleFamiliesRunning}
-              title="Wijs stijlfamilies toe aan designs zonder familie (via Claude + Notion)"
-            >
-              {styleFamiliesRunning ? 'Bezig...' : 'Stijlfamilies'}
-            </button>
+            <a href="/style-families" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+              Stijlfamilies
+            </a>
             <a href="/brand-voice" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
               Brand Voice
             </a>
@@ -404,50 +364,6 @@ export default function Dashboard() {
                   {r.status === 'ok' ? `Shopify #${r.shopifyProductId}` : r.detail ?? r.status}
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Stijlfamilies resultaat */}
-      {styleFamiliesResult && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 20,
-            borderLeft: `4px solid ${styleFamiliesResult.notionErrors > 0 ? '#f59e0b' : '#16a34a'}`,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h2 style={{ margin: 0 }}>Stijlfamilies resultaat</h2>
-            <button
-              onClick={() => setStyleFamiliesResult(null)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9ca3af' }}
-            >
-              ×
-            </button>
-          </div>
-          <p style={{ marginBottom: 12, color: '#374151' }}>
-            <strong style={{ color: '#166534' }}>{styleFamiliesResult.assigned}</strong> toegewezen &nbsp;|&nbsp;
-            <strong>{styleFamiliesResult.total}</strong> totaal
-            {styleFamiliesResult.notionErrors > 0 && (
-              <> &nbsp;|&nbsp; <strong style={{ color: '#d97706' }}>{styleFamiliesResult.notionErrors}</strong> Notion fouten</>
-            )}
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {styleFamiliesResult.families.map((f) => (
-              <span
-                key={f.family}
-                style={{
-                  fontSize: 12,
-                  padding: '3px 10px',
-                  borderRadius: 12,
-                  background: '#f3f4f6',
-                  color: '#374151',
-                }}
-              >
-                {f.family} <strong>({f.count})</strong>
-              </span>
             ))}
           </div>
         </div>
