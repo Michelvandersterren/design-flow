@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
           const collections = design.collections ? JSON.parse(design.collections) : []
           const colorTags = design.colorTags ? JSON.parse(design.colorTags) : []
 
-          const productType = design.inductionFriendly
-            ? 'INDUCTION'
+          const productType = design.splashFriendly
+            ? 'SPLASH'
             : design.circleFriendly
             ? 'CIRCLE'
             : 'INDUCTION'
@@ -91,16 +91,18 @@ export async function POST(request: NextRequest) {
               designId: design.id,
               language: 'nl',
               description: content.description,
-              altText: content.altText,
+              longDescription: content.longDescription,
               seoTitle: content.seoTitle,
               seoDescription: content.seoDescription,
+              googleShoppingDescription: content.googleShoppingDescription,
               translationStatus: 'PENDING',
             },
             update: {
               description: content.description,
-              altText: content.altText,
+              longDescription: content.longDescription,
               seoTitle: content.seoTitle,
               seoDescription: content.seoDescription,
+              googleShoppingDescription: content.googleShoppingDescription,
               translationStatus: 'PENDING',
             },
           })

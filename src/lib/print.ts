@@ -147,7 +147,7 @@ async function buildAndUploadPrintFile(
   tmpl: PrintTemplate,
   designBuffer: Buffer
 ): Promise<PrintFileResult> {
-  const fileName = buildPrintFileName(productType, designCode, tmpl.widthMM, tmpl.heightMM)
+  const fileName = buildPrintFileName(productType as 'IB' | 'SP' | 'MC', designCode, tmpl.widthMM, tmpl.heightMM)
 
   try {
     const pdfBuffer = await buildPrintPdf(designBuffer, tmpl.widthMM, tmpl.heightMM, productType)
@@ -298,6 +298,7 @@ function addCutContourSpotColor(
 
   // Voeg colorspace toe aan pagina Resources
   const resources = page.node.Resources()
+  if (!resources) throw new Error('Pagina heeft geen Resources dict')
   let csDict: PDFDict
   const existingCS = resources.lookup(PDFName.of('ColorSpace'))
   if (existingCS instanceof PDFDict) {

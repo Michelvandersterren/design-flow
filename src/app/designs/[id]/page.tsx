@@ -1080,8 +1080,8 @@ export default function DesignDetail() {
                               altText={(r as DesignMockup).altText || displayName}
                               viewUrl={viewUrl}
                               isNew={(r as MockupGenerateResult & { isNew?: boolean }).isNew}
-                              skipped={r.skipped}
-                              skipReason={r.skipReason}
+                              skipped={(r as MockupGenerateResult).skipped}
+                              skipReason={(r as MockupGenerateResult).skipReason}
                               isRegenerating={isRegen}
                               canRegenerate={!regeneratingMockup && !generatingMockups}
                               onRegenerate={() => regenerateMockup(r.templateId)}

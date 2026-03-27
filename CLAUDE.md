@@ -755,3 +755,42 @@ Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.market
 - `pdf-lib` in `serverExternalPackages` (next.config.js) is correct en moet blijven staan
 - Turbopack bundelt `pdf-lib` niet zelf — Node laadt het als external module
 - Als `pdf-lib` ooit opnieuw crasht: check eerst of `node_modules/pdf-lib/cjs/core/embedders/` volledig is
+
+---
+
+## Session — 2026-03-27: Bug fixes bulk workflow + TypeScript errors
+
+### Code review resultaten (alle routes gelezen, geteste endpoints)
+
+**Werkende endpoints** (code review + eerder live getest):
+- `GET/POST /api/ai/generate` ✅ — correct, slaat alle velden op, geen altText
+- `POST /api/designs/[id]/fork` ✅ — correct, kopieert design naar ander producttype
+- `POST /api/workflow/bulk-publish` ✅ — correct, non-fatal translation push, Notion write-back
+- `/upload` pagina ✅ — correct, AI-analyse, form pre-fill, product type flags
+- `/brand-voice` pagina ✅ — correct, sectie-navigatie, FAQ-beheer, save
+
+### Bug fixes committed (this session)
+
+**Bug 1 — `src/app/api/workflow/bulk/route.ts`** (altText + ontbrekende velden)
+- `altText: content.altText` verwijderd uit `content.upsert` create/update body
+- `longDescription: content.longDescription` en `googleShoppingDescription: content.googleShoppingDescription` toegevoegd
+- Root cause: stale velden uit een oudere versie van de Content upsert
+
+**Bug 2 — `src/app/api/workflow/bulk/route.ts`** (productType fallback)
+- `inductionFriendly ? 'INDUCTION' : circleFriendly ? 'CIRCLE' : 'INDUCTION'` vervangen door
+  `splashFriendly ? 'SPLASH' : circleFriendly ? 'CIRCLE' : 'INDUCTION'`
+- Root cause: `splashFriendly` werd nooit als eerste gecheckt → SP-designs kregen INDUCTION producttype voor AI content generatie
+
+**Bug 3 — `src/app/designs/[id]/page.tsx`** (TypeScript: skipped/skipReason)
+- `r.skipped` en `r.skipReason` gecasted naar `(r as MockupGenerateResult).skipped` / `(r as MockupGenerateResult).skipReason`
+- Root cause: union type `DesignMockup | MockupGenerateResult` — alleen MockupGenerateResult heeft die velden
+
+**Bug 4 — `src/lib/print.ts`** (TypeScript: productType string → union type)
+- `buildPrintFileName(productType, ...)` → `buildPrintFileName(productType as 'IB' | 'SP' | 'MC', ...)`
+- Root cause: `buildAndUploadPrintFile()` heeft `productType: string`, maar `buildPrintFileName()` verwacht `'IB' | 'SP' | 'MC'`
+
+**Bug 5 — `src/lib/print.ts`** (TypeScript: resources possibly undefined)
+- Na `const resources = page.node.Resources()`: null-guard `if (!resources) throw new Error(...)` toegevoegd
+- Root cause: `PDFPage.node.Resources()` return type is `PDFDict | undefined` volgens TypeScript
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors na alle fixes
