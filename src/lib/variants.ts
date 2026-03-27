@@ -19,30 +19,40 @@ async function tryRegisterGtin(variantId: string, ean: string, description: stri
 }
 
 /**
+ * Strip the product-type suffix (-IB, -SP, -MC) from forked designCodes.
+ * Forked designs have codes like FRMHRF-MC or FRMHRF-SP, but the SKU
+ * already has the product type as prefix (e.g. MC-FRMHRF-400-ADI-1),
+ * so we must use only the base code.
+ */
+function stripProductTypeSuffix(designCode: string): string {
+  return designCode.replace(/-(IB|SP|MC)$/i, '')
+}
+
+/**
  * Generate the SKU for an IB variant.
- * Format: IB-{DESIGNCODE}-{WIDTH}-{HEIGHT}
+ * Format: IB-{BASECODE}-{WIDTH}-{HEIGHT}
  * Example: IB-TAUPM-520-350
  */
 export function buildIbSku(designCode: string, width: number, height: number): string {
-  return `${PRODUCT_SKU_PREFIX.INDUCTION}-${designCode}-${width}-${height}`
+  return `${PRODUCT_SKU_PREFIX.INDUCTION}-${stripProductTypeSuffix(designCode)}-${width}-${height}`
 }
 
 /**
  * Generate the SKU for an MC variant.
- * Format: MC-{DESIGNCODE}-{DIAMETER}-{MATERIAL}-{SUFFIX}
+ * Format: MC-{BASECODE}-{DIAMETER}-{MATERIAL}-{SUFFIX}
  * Example: MC-TAUPM-600-ADI-1
  */
 export function buildMcSku(designCode: string, diameter: number, materialCode: string, suffix: number): string {
-  return `${PRODUCT_SKU_PREFIX.CIRCLE}-${designCode}-${diameter}-${materialCode}-${suffix}`
+  return `${PRODUCT_SKU_PREFIX.CIRCLE}-${stripProductTypeSuffix(designCode)}-${diameter}-${materialCode}-${suffix}`
 }
 
 /**
  * Generate the SKU for an SP variant.
- * Format: SP-{DESIGNCODE}-{WIDTH}-{HEIGHT}-{MATERIAL}
+ * Format: SP-{BASECODE}-{WIDTH}-{HEIGHT}-{MATERIAL}
  * Example: SP-ARCGL-600-300-G
  */
 export function buildSpSku(designCode: string, width: number, height: number, material: string): string {
-  return `${PRODUCT_SKU_PREFIX.SPLASH}-${designCode}-${width}-${height}-${material}`
+  return `${PRODUCT_SKU_PREFIX.SPLASH}-${stripProductTypeSuffix(designCode)}-${width}-${height}-${material}`
 }
 
 /**

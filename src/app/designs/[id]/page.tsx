@@ -226,6 +226,7 @@ export default function DesignDetail() {
   const [updatingShopify, setUpdatingShopify] = useState(false)
   const [updateShopifyResult, setUpdateShopifyResult] = useState<{ success?: boolean; error?: string } | null>(null)
   const [forking, setForking] = useState(false)
+  const [approving, setApproving] = useState(false)
   const shopifyConfigured = process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'
 
   const [generatingMockups, setGeneratingMockups] = useState(false)
@@ -488,6 +489,24 @@ export default function DesignDetail() {
     finally { setDeletingPrintFiles(false) }
   }
 
+  const handleStatusChange = async (newStatus: string) => {
+    if (!design) return
+    setApproving(true)
+    try {
+      const res = await fetch(`/api/designs/${params.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      const data = await res.json()
+      if (data.design) setDesign(data.design)
+    } catch {
+      alert(`Status wijzigen naar ${newStatus} mislukt`)
+    } finally {
+      setApproving(false)
+    }
+  }
+
   const openEditMode = () => {
     if (!design) return
     setEditForm({
@@ -660,10 +679,32 @@ export default function DesignDetail() {
               </p>
             </div>
 
-            {/* Edit button */}
-            <button className="btn btn-secondary" onClick={openEditMode} style={{ fontSize: 12, padding: '5px 12px', flexShrink: 0 }}>
-              Bewerken
-            </button>
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              {design.status === 'REVIEW' && (
+                <>
+                  <button
+                    className="btn btn-success"
+                    onClick={() => handleStatusChange('APPROVED')}
+                    disabled={approving}
+                    style={{ fontSize: 12, padding: '5px 12px' }}
+                  >
+                    {approving ? 'Bezig...' : 'Goedkeuren'}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => handleStatusChange('DRAFT')}
+                    disabled={approving}
+                    style={{ fontSize: 12, padding: '5px 12px', color: '#dc2626', borderColor: '#dc2626' }}
+                  >
+                    Afwijzen
+                  </button>
+                </>
+              )}
+              <button className="btn btn-secondary" onClick={openEditMode} style={{ fontSize: 12, padding: '5px 12px' }}>
+                Bewerken
+              </button>
+            </div>
           </div>
 
           {/* Workflow progress */}

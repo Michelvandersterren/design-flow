@@ -73,7 +73,7 @@ design-flow/
 - `inductionFriendly`, `circleFriendly`, `splashFriendly`: product type flags
 - `collections`, `colorTags`: JSON arrays (strings)
 - `driveFileId`, `driveFileName`: source design file on Google Drive
-- `status`: DRAFT | REVIEW | APPROVED | LIVE | FAILED
+- `status`: DRAFT → CONTENT_GENERATING → REVIEW → APPROVED → PUBLISHING → LIVE | FAILED | ARCHIVED
 
 ### Variant
 - `productType`: IB | MC | SP
@@ -113,7 +113,7 @@ design-flow/
 - `driveUrl` stored as `webContentLink`; view URL built as `https://drive.google.com/file/d/{fileId}/view`
 
 ### Shopify
-- SKU structure: `{PREFIX}-{CODE}-{WIDTH}-{HEIGHT}` (IB/SP) or `{PREFIX}-{CODE}-{DIAMETER}` (MC)
+- SKU structure: `{PREFIX}-{CODE}-{WIDTH}-{HEIGHT}` (IB/SP) or `MC-{CODE}-{DIAMETER}-{MAT}-{SUFFIX}` (MC)
 - Publishes as DRAFT; bulk publish only for APPROVED designs
 - Images: mockup `driveUrl` passed as `images[{ src }]` — Drive URL public access not yet verified
 - `body_html` = korte description (`description` veld)
@@ -154,9 +154,13 @@ design-flow/
 
 ### MC — Muurcirkels
 - 4 diameters: 400, 600, 800, 1000mm
-- Material: Aluminium-Dibond, matte coating (no vinyl texture)
-- SKU: `MC-{CODE}-{DIAMETER_MM}`
-- Prices: €19.95–€44.95
+- 2 materialen: Aluminium Dibond (ADI) + Forex (FRX) — 8 varianten per design
+- SKU: `MC-{CODE}-{DIAMETER}-{MAT}-{SUFFIX}` (bijv. `MC-KAL-600-ADI-1`)
+- Materiaalcodes: `ADI` (Aluminium Dibond), `FRX` (Forex)
+- Suffix: `1` voor 400/600mm, `2` voor 800/1000mm
+- Shopify opties: "Diameter" + "Materiaal" (2 opties, net als SP)
+- Prijzen ADI: €39,50 / €54,50 / €79,50 / €120,00
+- Prijzen FRX: €29,50 / €44,50 / €59,50 / €94,50
 
 ## Environment Variables
 
@@ -209,6 +213,8 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ Design detail page redesign: tabs, sticky header, workflow progress, lightbox
 - ✅ Print PDFs via pdf-lib with CutContour spot color + 10mm bleed
 - ✅ Split content: `description` (kort, Shopify body_html) + `longDescription` (lang, metafield)
+- ✅ MC 8 varianten: 4 diameters × 2 materialen (ADI + Forex)
+- ✅ Approve flow: Goedkeuren/Afwijzen knoppen (detail) + bulk approve (homepage)
 
 ## Known Issues / Backlog
 
@@ -837,5 +843,68 @@ Varianten tab — metafield kolommen:
 - `condition/gender/age` kolom verwijderd (data cel + header)
 - `colSpan` van metafield header: 5 → 4
 - Behouden: materiaal, breedte (cm), hoogte (cm), mpn
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+---
+
+## Session — 2026-03-27 (vervolg): MC varianten uitbreiding + Brand voice update + Approve flow
+
+### MC varianten uitbreiding (commit bb8df50)
+
+MC designs genereren nu **8 varianten** (4 diameters × 2 materialen) in plaats van 4.
+
+**`src/lib/constants.ts`**
+- `MC_MATERIALS` array toegevoegd: `[{ code: 'ADI', label: 'Aluminium Dibond' }, { code: 'FRX', label: 'Forex' }]`
+- `MC_SIZES` herschreven met `priceAdi` / `priceFrx` / `suffix` / `label` (met ø prefix)
+
+**`src/lib/variants.ts`**
+- `buildMcSku()`: nu 4 params (`designCode, diameter, materialCode, suffix`)
+- `generateMcVariants()`: itereert over `MC_SIZES × MC_MATERIALS` = 8 varianten
+- Slaat `material` code (ADI/FRX) op in DB variant record
+
+**`src/lib/shopify.ts`**
+- MC verwijderd uit statische `PRODUCT_MATERIAL` / `MATERIAL_PLAIN` maps
+- MC label helpers: `mcSizeLabel()` (diameter met ø), `mcMaterialLabel()` (ADI→Aluminium Dibond, FRX→Forex)
+- MC variants krijgen `option1` (diameter) + `option2` (materiaal) — 2-optie product net als SP
+- Materiaal metafield per variant i.p.v. statisch op product-level
+- Product opties: `[{ name: 'Diameter' }, { name: 'Materiaal' }]`
+
+**`src/app/designs/[id]/page.tsx`**
+- `mcMaterialLabels` map + `getVariantMaterialFeed()` handelt MC per-variant materiaal in UI
+
+### Brand voice DB update
+
+- `materialMC`: herschreven naar alleen Aluminium Dibond + Forex (multiplex, dibond budget/premium/butler finish verwijderd)
+- `doNotUse`: regel toegevoegd: "Materialen die we niet verkopen: multiplex, dibond budget, dibond premium, dibond butler finish"
+
+### Approve flow
+
+REVIEW → APPROVED transitie was niet exposed in de UI. Nu gebouwd:
+
+**`src/app/designs/[id]/page.tsx`** — Detail pagina:
+- `approving` state variabele
+- `handleStatusChange(newStatus)` functie: PATCH naar `/api/designs/[id]` met `{ status: newStatus }`
+- "Goedkeuren" knop (groen, zet REVIEW → APPROVED) + "Afwijzen" knop (rood border, zet REVIEW → DRAFT)
+- Knoppen verschijnen naast "Bewerken" alleen wanneer `design.status === 'REVIEW'`
+- Na status wijziging: `setDesign(data.design)` voor directe UI update
+
+**`src/app/page.tsx`** — Homepage:
+- `bulkApproving` state variabele
+- `runBulkApprove()` functie: `Promise.all()` over alle REVIEW designs met PATCH naar APPROVED
+- Blauwe knop "Keur X REVIEW goed" verschijnt wanneer `stats.review > 0`
+- Bevestigingsdialoog vooraf; na voltooiing: `fetchDesigns()` herlaadt lijst
+
+**Geen nieuw API endpoint nodig** — bestaande `PATCH /api/designs/[id]` accepteert `{ status: 'APPROVED' }` (Prisma skipt undefined velden)
+
+### SKU fix: dubbele producttype prefix bij forked designs
+
+**Probleem**: Forked designs krijgen een designCode met producttype suffix (bijv. `FRMHRF-MC`). De SKU-bouw functies voegden het producttype prefix ook toe, waardoor SKUs als `MC-FRMHRF-MC-400-ADI-1` ontstonden (dubbel `-MC-`). Shopify verwacht `MC-FRMHRF-400-ADI-1`.
+
+**`src/lib/variants.ts`**
+- Nieuwe helper `stripProductTypeSuffix(designCode)`: verwijdert trailing `-IB`, `-SP`, `-MC` via regex `/(-(IB|SP|MC))$/i`
+- `buildIbSku()`, `buildMcSku()`, `buildSpSku()`: alle drie gebruiken nu `stripProductTypeSuffix(designCode)` voor de code in de SKU
+
+**Data cleanup**: 3 forked designs (FRMHRF-MC, FRMHRF-SP, PPFIMP-SP) — alle 84 varianten verwijderd en opnieuw gegenereerd met correcte SKUs. Geen van deze designs was naar Shopify gepubliceerd.
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors

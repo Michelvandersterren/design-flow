@@ -74,6 +74,7 @@ export default function Dashboard() {
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
   const [bulkPublishRunning, setBulkPublishRunning] = useState(false)
   const [bulkPublishResult, setBulkPublishResult] = useState<BulkPublishResult | null>(null)
+  const [bulkApproving, setBulkApproving] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
@@ -165,6 +166,30 @@ export default function Dashboard() {
     }
   }
 
+  const runBulkApprove = async () => {
+    const reviewDesigns = designs.filter((d) => d.status === 'REVIEW')
+    if (reviewDesigns.length === 0) return
+    if (!confirm(`${reviewDesigns.length} REVIEW designs goedkeuren?`)) return
+
+    setBulkApproving(true)
+    try {
+      await Promise.all(
+        reviewDesigns.map((d) =>
+          fetch(`/api/designs/${d.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'APPROVED' }),
+          })
+        )
+      )
+      await fetchDesigns()
+    } catch {
+      alert('Bulk goedkeuren mislukt')
+    } finally {
+      setBulkApproving(false)
+    }
+  }
+
   const stats = {
     total: designs.length,
     draft: designs.filter((d) => d.status === 'DRAFT').length,
@@ -213,6 +238,17 @@ export default function Dashboard() {
                 title="Genereer content, vertaal naar DE + EN en maak varianten voor alle DRAFT designs"
               >
                 {bulkRunning ? 'Bezig...' : `Verwerk ${stats.draft} DRAFT designs`}
+              </button>
+            )}
+            {stats.review > 0 && (
+              <button
+                className="btn btn-success"
+                onClick={runBulkApprove}
+                disabled={bulkApproving}
+                title="Keur alle REVIEW designs goed"
+                style={{ background: '#2563eb', borderColor: '#2563eb' }}
+              >
+                {bulkApproving ? 'Bezig...' : `Keur ${stats.review} REVIEW goed`}
               </button>
             )}
             {stats.approved > 0 && (
