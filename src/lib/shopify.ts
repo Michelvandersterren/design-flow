@@ -162,10 +162,7 @@ export async function buildShopifyProduct(designId: string) {
       variantMetafields.push({ namespace: 'custom', key: 'ean',            value: v.ean,                              type: 'single_line_text_field' })
     }
 
-    // Google Shopping / feed fields (mm-google-shopping namespace)
-    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'condition',  value: 'new',                        type: 'single_line_text_field' })
-    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'gender',     value: 'unisex',                     type: 'single_line_text_field' })
-    variantMetafields.push({ namespace: 'mm-google-shopping', key: 'age_group',  value: 'adult',                      type: 'single_line_text_field' })
+    // MPN per variant (unique per SKU)
     variantMetafields.push({ namespace: 'mm-google-shopping', key: 'mpn',        value: v.sku,                        type: 'single_line_text_field' })
 
     return {
@@ -240,15 +237,13 @@ export async function buildShopifyProduct(designId: string) {
         ...(nlContent.longDescription
           ? [{ namespace: 'custom', key: 'marketplace_description', value: toBodyHtml(nlContent.longDescription),   type: 'multi_line_text_field' }]
           : []),
-        ...(nlContent.longDescription
-          ? [{ namespace: 'custom', key: 'long_description',       value: toBodyHtml(nlContent.longDescription),    type: 'multi_line_text_field' }]
-          : []),
         ...(nlContent.googleShoppingDescription
           ? [{ namespace: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription,      type: 'single_line_text_field' }]
           : []),
-        ...(design.content.find((c) => c.language === 'de')?.googleShoppingDescription
-          ? [{ namespace: 'custom', key: 'google_description_de',  value: design.content.find((c) => c.language === 'de')!.googleShoppingDescription!, type: 'single_line_text_field' }]
-          : []),
+        // Google Shopping feed fields (product-level, not per-variant)
+        { namespace: 'mm-google-shopping', key: 'condition',       value: 'new',                                    type: 'single_line_text_field' },
+        { namespace: 'mm-google-shopping', key: 'gender',          value: 'unisex',                                 type: 'single_line_text_field' },
+        { namespace: 'mm-google-shopping', key: 'age_group',       value: 'adult',                                  type: 'single_line_text_field' },
         ...(nlContent.seoTitle
           ? [{ namespace: 'global', key: 'title_tag',              value: nlContent.seoTitle,                       type: 'single_line_text_field' }]
           : []),
@@ -328,8 +323,8 @@ export async function createShopifyProduct(designId: string) {
  *  - body_html (short description)
  *  - metafields: product_type, material, induction_compatible,
  *                product_information, marketplace_description (from longDescription),
- *                long_description, google_description, google_description_de,
- *                global.title_tag, global.description_tag
+ *                google_description, global.title_tag, global.description_tag,
+ *                mm-google-shopping.condition/gender/age_group
  */
 export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
   const design = await prisma.design.findUnique({
@@ -418,15 +413,14 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   }
   if (nlContent.longDescription) {
     await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
-    await upsertMetafield('custom', 'long_description',        toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
   }
   if (nlContent.googleShoppingDescription) {
     await upsertMetafield('custom', 'google_description',      nlContent.googleShoppingDescription,            'single_line_text_field')
   }
-  const deContent = design.content.find((c) => c.language === 'de')
-  if (deContent?.googleShoppingDescription) {
-    await upsertMetafield('custom', 'google_description_de',   deContent.googleShoppingDescription,            'single_line_text_field')
-  }
+  // Google Shopping feed fields (product-level)
+  await upsertMetafield('mm-google-shopping', 'condition',     'new',                                          'single_line_text_field')
+  await upsertMetafield('mm-google-shopping', 'gender',        'unisex',                                       'single_line_text_field')
+  await upsertMetafield('mm-google-shopping', 'age_group',     'adult',                                        'single_line_text_field')
   if (nlContent.seoTitle) {
     await upsertMetafield('global', 'title_tag',              nlContent.seoTitle,                             'single_line_text_field')
   }

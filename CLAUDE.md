@@ -86,7 +86,7 @@ design-flow/
 ### Content
 - `language`: nl | de | en | fr
 - `description`: korte beschrijving (1-2 zinnen) — Shopify `body_html`, verschijnt boven de koop-knop
-- `longDescription`: lange beschrijving (2-3 paragrafen) — Shopify metafield `custom.long_description`
+- `longDescription`: lange beschrijving (2-3 paragrafen) — Shopify metafield `custom.marketplace_description` (als HTML)
 - `seoTitle`, `seoDescription`, `googleShoppingDescription`
 - `translationStatus`
 - `altText` veld bestaat nog in DB (nullable) maar wordt niet meer gebruikt — nooit verwijderen via migratie
@@ -117,7 +117,7 @@ design-flow/
 - Publishes as DRAFT; bulk publish only for APPROVED designs
 - Images: mockup `driveUrl` passed as `images[{ src }]` — Drive URL public access not yet verified
 - `body_html` = korte description (`description` veld)
-- Long description via metafield `custom.long_description` (multi_line_text_field)
+- Long description via metafield `custom.marketplace_description` (multi_line_text_field, HTML)
 
 ### Claude Sonnet (AI Content)
 - Content generation uses actual image (Claude vision) + brand voice document + product type
@@ -705,9 +705,10 @@ Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.market
 | `custom.beschrijving_afbeelding` | `driveFileId` eerste mockup |
 | `custom.product_information` | `nlContent.description` (plain) |
 | `custom.marketplace_description` | `toBodyHtml(nlContent.longDescription)` (HTML) |
-| `custom.long_description` | `toBodyHtml(nlContent.longDescription)` (HTML) |
 | `custom.google_description` | `nlContent.googleShoppingDescription` |
-| `custom.google_description_de` | `deContent.googleShoppingDescription` (apart, niet via Translations API) |
+| `mm-google-shopping.condition` | `"new"` |
+| `mm-google-shopping.gender` | `"unisex"` |
+| `mm-google-shopping.age_group` | `"adult"` |
 | `global.title_tag` | `nlContent.seoTitle` |
 | `global.description_tag` | `nlContent.seoDescription` |
 
@@ -715,7 +716,6 @@ Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.market
 | Metafield | Waarde |
 |---|---|
 | `body_html` | `toBodyHtml(content.description)` |
-| `custom.long_description` | `toBodyHtml(content.longDescription)` |
 | `custom.product_information` | `content.description` |
 | `custom.marketplace_description` | `toBodyHtml(content.longDescription)` |
 | `global.title_tag` | `content.seoTitle` |
@@ -794,3 +794,48 @@ Inspectie van bestaand Shopify product (ID 9649643356502) toonde: `custom.market
 - Root cause: `PDFPage.node.Resources()` return type is `PDFDict | undefined` volgens TypeScript
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors na alle fixes
+
+---
+
+## Session — 2026-03-27 (vervolg): Metafield restructuring — deduplicatie + Google Shopping naar product-level
+
+### Channable + Shopify Translations — Research
+
+Channable's Shopify Markets importer heeft een "Include translated metafields" instelling die Shopify Translations API waarden importeert als aparte velden per taal (bijv. `title_fr`, `marketplace_description_de`). Dit bevestigt:
+- Per-taal metafields zijn **niet nodig** — enkele metafield + Shopify Translations API is correct
+- `custom.google_description_de` als apart metafield is overbodig
+- `custom.long_description` is een duplicaat van `custom.marketplace_description` (beide bevatten dezelfde HTML)
+
+### Changes (dit session): Metafield restructuring
+
+**`src/lib/shopify.ts`**
+
+`buildShopifyProduct()`:
+- `custom.long_description` metafield verwijderd (was duplicaat van `marketplace_description`)
+- `custom.google_description_de` metafield verwijderd (Translations API handelt DE vertaling af)
+- `mm-google-shopping.condition/gender/age_group` verplaatst van **variant-level** naar **product-level**
+- Variant metafields: alleen `mm-google-shopping.mpn` (= SKU) behouden per variant
+
+`updateShopifyProduct()`:
+- `custom.long_description` upsert verwijderd
+- `custom.google_description_de` upsert verwijderd
+- `mm-google-shopping.condition/gender/age_group` upserts toegevoegd op product-level
+- JSDoc comment bijgewerkt
+
+**`src/lib/shopify-translations.ts`**
+- `custom.long_description` verwijderd uit `addMetafieldTranslation` calls (regel 183)
+- `custom.long_description` verwijderd uit file header comment
+
+**`src/app/designs/[id]/page.tsx`**
+
+Content tab — Shopify Metafields (product) sectie:
+- `custom.marketplace_description` display label gecorrigeerd: was `'(HTML versie van korte beschrijving)'`, nu `'(HTML versie van lange beschrijving)'`
+- `custom.long_description` rij verwijderd
+- Nieuwe rijen: `mm-google-shopping.condition`, `mm-google-shopping.gender`, `mm-google-shopping.age_group`
+
+Varianten tab — metafield kolommen:
+- `condition/gender/age` kolom verwijderd (data cel + header)
+- `colSpan` van metafield header: 5 → 4
+- Behouden: materiaal, breedte (cm), hoogte (cm), mpn
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors

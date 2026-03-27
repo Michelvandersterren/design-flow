@@ -10,7 +10,6 @@
  *
  * Fields pushed per locale:
  *   - Product: title, body_html
- *   - Metafield custom.long_description: value
  *   - Metafield custom.product_information: value
  *   - Metafield custom.marketplace_description: value
  *   - Metafield global.title_tag: value
@@ -180,7 +179,6 @@ async function pushTranslationsForLocale(
     }
   }
 
-  await addMetafieldTranslation('custom.long_description',        toBodyHtml(content.longDescription),  'value')
   await addMetafieldTranslation('custom.product_information',      content.description,                   'value')
   await addMetafieldTranslation('custom.marketplace_description',  toBodyHtml(content.longDescription),   'value')
   await addMetafieldTranslation('global.title_tag',                content.seoTitle,                      'value')

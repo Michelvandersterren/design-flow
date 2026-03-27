@@ -1277,11 +1277,13 @@ export default function DesignDetail() {
               { label: 'custom.material_plain',         ns: 'custom', key: 'material_plain',         value: firstType ? (materialPlain[firstType] ?? null) : null },
               { label: 'custom.beschrijving_afbeelding',ns: 'custom', key: 'beschrijving_afbeelding',value: firstMockupFileId },
               { label: 'custom.product_information',    ns: 'custom', key: 'product_information',    value: nlContent.description },
-              { label: 'custom.marketplace_description',ns: 'custom', key: 'marketplace_description',value: nlContent.description ? '(HTML versie van korte beschrijving)' : null },
-              { label: 'custom.long_description',       ns: 'custom', key: 'long_description',       value: nlContent.longDescription ? '(HTML versie van lange beschrijving)' : null },
+              { label: 'custom.marketplace_description',ns: 'custom', key: 'marketplace_description',value: nlContent.longDescription ? '(HTML versie van lange beschrijving)' : null },
               { label: 'custom.google_description',     ns: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription },
               { label: 'global.title_tag',              ns: 'global', key: 'title_tag',              value: nlContent.seoTitle },
               { label: 'global.description_tag',        ns: 'global', key: 'description_tag',        value: nlContent.seoDescription },
+              { label: 'mm-google-shopping.condition',   ns: 'mm-google-shopping', key: 'condition',   value: 'new' },
+              { label: 'mm-google-shopping.gender',      ns: 'mm-google-shopping', key: 'gender',      value: 'unisex' },
+              { label: 'mm-google-shopping.age_group',   ns: 'mm-google-shopping', key: 'age_group',   value: 'adult' },
             ]
             return (
               <div className="card" style={{ marginBottom: 0 }}>
@@ -1444,7 +1446,7 @@ export default function DesignDetail() {
                       {['Type', 'Maat (mm)', 'SKU', 'EAN', 'Prijs', 'Shopify ID'].map((h) => (
                         <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{h}</th>
                       ))}
-                      <th colSpan={5} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#6b7280', borderLeft: '2px solid #e5e7eb', fontSize: 11 }}>
+                      <th colSpan={4} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600, color: '#6b7280', borderLeft: '2px solid #e5e7eb', fontSize: 11 }}>
                         Shopify Metafields (variant)
                       </th>
                     </tr>
@@ -1457,7 +1459,6 @@ export default function DesignDetail() {
                         { key: 'breedte', label: 'breedte (cm)' },
                         { key: 'hoogte', label: 'hoogte (cm)' },
                         { key: 'mpn', label: 'mpn' },
-                        { key: 'condition', label: 'condition/gender/age' },
                       ].map(({ key, label }) => (
                         <th key={key} style={{ textAlign: 'left', padding: '0 12px 6px', fontWeight: 500, color: '#9ca3af', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, borderLeft: key === 'materiaal' ? '2px solid #e5e7eb' : undefined }}>{label}</th>
                       ))}
@@ -1478,7 +1479,6 @@ export default function DesignDetail() {
                         <td style={{ padding: '7px 12px', color: '#374151' }}>{getWidthCm(v)}</td>
                         <td style={{ padding: '7px 12px', color: '#374151' }}>{getHeightCm(v)}</td>
                         <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: '#6b7280', fontSize: 11 }}>{v.sku}</td>
-                        <td style={{ padding: '7px 12px', color: '#6b7280', fontSize: 11 }}>new · unisex · adult</td>
                       </tr>
                     ))}
                   </tbody>
