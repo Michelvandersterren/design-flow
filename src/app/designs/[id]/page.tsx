@@ -1107,13 +1107,16 @@ export default function DesignDetail() {
                           const viewUrl = fileId ? `https://drive.google.com/file/d/${fileId}/view` : m.driveUrl
                           const displayName = (m as MockupGenerateResult).label || (m as DesignMockup).outputName || m.outputName
                           const imgSrc = fileId ? `/api/drive-image/${fileId}` : (m.driveUrl || '')
+                          const sizeKey = (m as DesignMockup).sizeKey ?? (m as MockupGenerateResult).sizeKey
                           return (
                             <MockupCard
-                              key={m.templateId}
+                              key={`${m.templateId}-${sizeKey}`}
                               name={displayName}
                               imgSrc={imgSrc}
                               altText={(m as DesignMockup).altText || displayName}
                               viewUrl={viewUrl}
+                              skipped={(m as MockupGenerateResult).skipped}
+                              skipReason={(m as MockupGenerateResult).skipReason}
                               isRegenerating={regeneratingMockup === m.templateId}
                               canRegenerate={!regeneratingMockup && !generatingMockups}
                               onRegenerate={() => regenerateMockup(m.templateId)}
