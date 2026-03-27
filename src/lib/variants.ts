@@ -1,5 +1,5 @@
 import { prisma } from './prisma'
-import { IB_SIZES, MC_SIZES, SP_SIZES, SP_MATERIALS, PRODUCT_SKU_PREFIX } from './constants'
+import { IB_SIZES, MC_SIZES, MC_MATERIALS, SP_SIZES, SP_MATERIALS, PRODUCT_SKU_PREFIX } from './constants'
 import { generateNextEan } from './ean'
 import { registerGtin } from './gs1'
 
@@ -29,11 +29,11 @@ export function buildIbSku(designCode: string, width: number, height: number): s
 
 /**
  * Generate the SKU for an MC variant.
- * Format: MC-{DESIGNCODE}-{DIAMETER}
- * Example: MC-TAUPM-600
+ * Format: MC-{DESIGNCODE}-{DIAMETER}-{MATERIAL}-{SUFFIX}
+ * Example: MC-TAUPM-600-ADI-1
  */
-export function buildMcSku(designCode: string, diameter: number): string {
-  return `${PRODUCT_SKU_PREFIX.CIRCLE}-${designCode}-${diameter}`
+export function buildMcSku(designCode: string, diameter: number, materialCode: string, suffix: number): string {
+  return `${PRODUCT_SKU_PREFIX.CIRCLE}-${designCode}-${diameter}-${materialCode}-${suffix}`
 }
 
 /**
@@ -132,38 +132,44 @@ export async function generateIbVariants(designId: string, designCode: string) {
 
 /**
  * Generate all MC variants for a design and persist them to the DB.
- * Skips diameters that already have a variant (idempotent).
+ * 4 diameters × 2 materials = 8 variants per design.
+ * Skips SKUs that already exist (idempotent).
  */
 export async function generateMcVariants(designId: string, designCode: string) {
   const created = []
   const skipped = []
 
   for (const size of MC_SIZES) {
-    const sku = buildMcSku(designCode, size.diameter)
+    for (const mat of MC_MATERIALS) {
+      const sku = buildMcSku(designCode, size.diameter, mat.code, size.suffix)
 
-    const existing = await prisma.variant.findUnique({ where: { sku } })
-    if (existing) {
-      skipped.push(sku)
-      continue
+      const existing = await prisma.variant.findUnique({ where: { sku } })
+      if (existing) {
+        skipped.push(sku)
+        continue
+      }
+
+      const price = mat.code === 'ADI' ? size.priceAdi : size.priceFrx
+
+      const variant = await prisma.variant.create({
+        data: {
+          designId,
+          productType: 'MC',
+          size: `${size.diameter}`,
+          material: mat.code,
+          sku,
+          ean: await generateNextEan(),
+          price,
+          weight: size.weightGrams / 1000,
+        },
+      })
+
+      if (variant.ean) {
+        await tryRegisterGtin(variant.id, variant.ean, `Muurcirkel ${size.diameter}mm ${mat.label}`)
+      }
+
+      created.push(variant)
     }
-
-    const variant = await prisma.variant.create({
-      data: {
-        designId,
-        productType: 'MC',
-        size: `${size.diameter}`,
-        sku,
-        ean: await generateNextEan(),
-        price: size.price,
-        weight: size.weightGrams / 1000,
-      },
-    })
-
-    if (variant.ean) {
-      await tryRegisterGtin(variant.id, variant.ean, `Magnetische cirkel ${size.diameter}mm`)
-    }
-
-    created.push(variant)
   }
 
   return { created, skipped }

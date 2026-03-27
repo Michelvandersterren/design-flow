@@ -1425,10 +1425,12 @@ export default function DesignDetail() {
             </div>
             {design.variants.length > 0 ? (() => {
               // Helpers for metafield display
-              const materialPlainMap: Record<string, string> = { IB: 'Vinyl', MC: 'Aluminium-Dibond', SP: 'Aluminium-Dibond' }
+              const materialPlainMap: Record<string, string> = { IB: 'Vinyl', SP: 'Aluminium-Dibond' }
               const spMaterialLabels: Record<string, string> = { GLAS: 'Gehard Glas', BRUSHED: 'Brushed Aluminium', ALU: 'Aluminium-Dibond' }
+              const mcMaterialLabels: Record<string, string> = { ADI: 'Aluminium Dibond', FRX: 'Forex' }
               const getVariantMaterialFeed = (v: Variant): string => {
                 if (v.productType === 'SP' && v.material) return spMaterialLabels[v.material] ?? v.material
+                if (v.productType === 'MC' && v.material) return mcMaterialLabels[v.material] ?? v.material
                 return materialPlainMap[v.productType] ?? '—'
               }
               const getWidthCm = (v: Variant): string => {

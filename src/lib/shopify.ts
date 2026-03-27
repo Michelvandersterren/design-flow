@@ -1,18 +1,18 @@
 import { prisma } from './prisma'
-import { SP_SIZES, SP_MATERIALS } from './constants'
+import { SP_SIZES, SP_MATERIALS, MC_MATERIALS, MC_SIZES } from './constants'
 import { getDriveDirectUrl } from './drive'
 
-// Static material labels per product type (matches BrandVoice materialIB/MC/SP)
+// Static material labels per product type (matches BrandVoice materialIB/SP).
+// MC is excluded: material varies per variant (Aluminium Dibond / Forex).
 const PRODUCT_MATERIAL: Record<string, string> = {
   IB: 'Vinyl texture overlay',
-  MC: 'Aluminium-Dibond matte',
   SP: 'Aluminium-Dibond matte',
 }
 
-// Plain material label for feeds (Bol.com, Google Shopping etc.)
+// Plain material label for feeds (Bol.com, Google Shopping etc.).
+// MC is excluded: material varies per variant.
 const MATERIAL_PLAIN: Record<string, string> = {
   IB: 'Vinyl',
-  MC: 'Aluminium-Dibond',
   SP: 'Aluminium-Dibond',
 }
 
@@ -105,8 +105,17 @@ export async function buildShopifyProduct(designId: string) {
     return SP_MATERIALS.find((m) => m.code === code)?.label ?? code
   }
 
+  // Lookup helpers for MC labels
+  const mcSizeLabel = (diameter: string): string => {
+    const d = Math.round(Number(diameter))
+    return MC_SIZES.find((s) => s.diameter === d)?.label ?? `ø ${d / 10} cm`
+  }
+  const mcMaterialLabel = (code: string): string => {
+    return MC_MATERIALS.find((m) => m.code === code)?.label ?? code
+  }
+
   // Build Shopify variants
-  const isSpProduct = firstType === 'SP'
+  const hasTwoOptions = firstType === 'SP' || firstType === 'MC'
   const shopifyVariants = design.variants.map((v) => {
     let option1: string
     let option2: string | undefined
@@ -114,12 +123,14 @@ export async function buildShopifyProduct(designId: string) {
     if (v.productType === 'SP') {
       option1 = spSizeLabel(v.size)
       option2 = spMaterialLabel(v.material ?? '')
+    } else if (v.productType === 'MC') {
+      option1 = mcSizeLabel(v.size)
+      option2 = mcMaterialLabel(v.material ?? '')
     } else if (v.productType === 'IB') {
       const [w, h] = v.size.split('x')
       option1 = formatIbLabel(Number(w), Number(h))
     } else {
-      // MC
-      option1 = `${Math.round(Number(v.size) / 10)} cm`
+      option1 = v.size
     }
 
     // Build variant metafields
@@ -134,11 +145,13 @@ export async function buildShopifyProduct(designId: string) {
       variantMetafields.push({ namespace: 'custom', key: 'height_mm',      value: String(Math.round(Number(hStr))),    type: 'number_integer' })
     }
 
-    // Material per variant (SP only — IB/MC have uniform material)
+    // Material per variant (SP and MC have material per variant, IB is uniform)
     if (v.productType === 'SP' && v.material) {
       variantMetafields.push({ namespace: 'custom', key: 'materiaal',      value: spMaterialLabel(v.material),         type: 'single_line_text_field' })
+    } else if (v.productType === 'MC' && v.material) {
+      variantMetafields.push({ namespace: 'custom', key: 'materiaal',      value: mcMaterialLabel(v.material),         type: 'single_line_text_field' })
     } else {
-      // IB / MC: static material from MATERIAL_PLAIN
+      // IB: static material from MATERIAL_PLAIN
       const matLabel = MATERIAL_PLAIN[v.productType] ?? ''
       if (matLabel) variantMetafields.push({ namespace: 'custom', key: 'materiaal', value: matLabel,                   type: 'single_line_text_field' })
     }
@@ -190,9 +203,9 @@ export async function buildShopifyProduct(designId: string) {
       .join('\n')
   }
 
-  // SP needs two option definitions
-  const options = isSpProduct
-    ? [{ name: 'Formaat' }, { name: 'Materiaal' }]
+  // SP and MC need two option definitions (size + material)
+  const options = hasTwoOptions
+    ? [{ name: firstType === 'MC' ? 'Diameter' : 'Formaat' }, { name: 'Materiaal' }]
     : [{ name: 'Formaten' }]
 
   // Build images array from saved mockups.

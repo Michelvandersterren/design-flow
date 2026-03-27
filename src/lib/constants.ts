@@ -74,12 +74,20 @@ export const IB_SIZES = [
   { width: 916,  height: 527, price: 37.50, weightGrams: 500, label: '91.6 × 52.7 cm' },
 ] as const
 
-// Standard MC (Muurcirkel) diameters in mm
+// MC (Muurcirkel) materials. code = SKU segment, label = Shopify option value.
+export const MC_MATERIALS = [
+  { code: 'ADI', label: 'Aluminium Dibond' },
+  { code: 'FRX', label: 'Forex' },
+] as const
+
+// Standard MC (Muurcirkel) diameters in mm.
+// priceAdi / priceFrx = selling price per material.
+// suffix = SKU trailing number (1 for small, 2 for large).
 export const MC_SIZES = [
-  { diameter: 400,  price: 19.95, weightGrams: 200, label: '40 cm' },
-  { diameter: 600,  price: 24.95, weightGrams: 350, label: '60 cm' },
-  { diameter: 800,  price: 34.95, weightGrams: 600, label: '80 cm' },
-  { diameter: 1000, price: 44.95, weightGrams: 900, label: '100 cm' },
+  { diameter: 400,  priceAdi: 39.50, priceFrx: 29.50, weightGrams: 200, suffix: 1, label: 'ø 40 cm' },
+  { diameter: 600,  priceAdi: 54.50, priceFrx: 44.50, weightGrams: 350, suffix: 1, label: 'ø 60 cm' },
+  { diameter: 800,  priceAdi: 79.50, priceFrx: 59.50, weightGrams: 600, suffix: 2, label: 'ø 80 cm' },
+  { diameter: 1000, priceAdi: 120.00, priceFrx: 94.50, weightGrams: 900, suffix: 2, label: 'ø 100 cm' },
 ] as const
 
 // SP (Spatscherm) materials. priceOffset is added on top of the base (G) price.
