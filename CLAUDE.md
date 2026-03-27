@@ -215,6 +215,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ Split content: `description` (kort, Shopify body_html) + `longDescription` (lang, metafield)
 - ✅ MC 8 varianten: 4 diameters × 2 materialen (ADI + Forex)
 - ✅ Approve flow: Goedkeuren/Afwijzen knoppen (detail) + bulk approve (homepage)
+- ✅ Producttype filter: IB/SP/MC toggle-buttons op homepage dashboard
 
 ## Known Issues / Backlog
 
@@ -908,3 +909,15 @@ REVIEW → APPROVED transitie was niet exposed in de UI. Nu gebouwd:
 **Data cleanup**: 3 forked designs (FRMHRF-MC, FRMHRF-SP, PPFIMP-SP) — alle 84 varianten verwijderd en opnieuw gegenereerd met correcte SKUs. Geen van deze designs was naar Shopify gepubliceerd.
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+### Producttype filter op homepage
+
+**`src/app/page.tsx`**
+- `filterType` state variabele: `null | 'IB' | 'SP' | 'MC'` (null = geen filter)
+- 3 toggle-buttons (IB / SP / MC) in de zoek+filter balk, naast het zoekveld
+- Actieve knop: blauwe achtergrond (`#3b82f6`), witte tekst; nogmaals klikken = deactiveren
+- `filteredDesigns` logica uitgebreid met `matchType` check:
+  - IB → `design.inductionFriendly === true`
+  - SP → `design.splashFriendly === true`
+  - MC → `design.circleFriendly === true`
+- Filter combineert met bestaande zoek (query) en status filter

@@ -77,6 +77,7 @@ export default function Dashboard() {
   const [bulkApproving, setBulkApproving] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [filterType, setFilterType] = useState('')
 
   const fetchDesigns = useCallback(async () => {
     try {
@@ -204,7 +205,12 @@ export default function Dashboard() {
       d.designName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.designCode.toLowerCase().includes(searchTerm.toLowerCase())
     const matchStatus = !filterStatus || d.status === filterStatus
-    return matchSearch && matchStatus
+    const matchType =
+      !filterType ||
+      (filterType === 'IB' && d.inductionFriendly) ||
+      (filterType === 'SP' && d.splashFriendly) ||
+      (filterType === 'MC' && d.circleFriendly)
+    return matchSearch && matchStatus && matchType
   })
 
   const getWorkflowBadges = (design: Design) => {
@@ -438,6 +444,30 @@ export default function Dashboard() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[
+              { code: 'IB', label: 'IB' },
+              { code: 'SP', label: 'SP' },
+              { code: 'MC', label: 'MC' },
+            ].map(({ code, label }) => (
+              <button
+                key={code}
+                onClick={() => setFilterType(filterType === code ? '' : code)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #e5e7eb',
+                  background: filterType === code ? '#2563eb' : '#fff',
+                  color: filterType === code ? '#fff' : '#374151',
+                  fontWeight: filterType === code ? 600 : 400,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <select
             value={filterStatus}
