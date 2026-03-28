@@ -158,7 +158,7 @@ design-flow/
 - SKU: `MC-{CODE}-{DIAMETER}-{MAT}-{SUFFIX}` (bijv. `MC-KAL-600-ADI-1`)
 - Materiaalcodes: `ADI` (Aluminium Dibond), `FRX` (Forex)
 - Suffix: `1` voor 400/600mm, `2` voor 800/1000mm
-- Shopify opties: "Diameter" + "Materiaal" (2 opties, net als SP)
+- Shopify opties: "Formaat" + "Materiaal" (2 opties, net als SP)
 - Prijzen ADI: €39,50 / €54,50 / €79,50 / €120,00
 - Prijzen FRX: €29,50 / €44,50 / €59,50 / €94,50
 
@@ -490,7 +490,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - `Content.altText` bestaat nog als nullable kolom in de DB — **nooit verwijderen via migratie**; het wordt simpelweg niet meer geschreven of gelezen
 - Shopify REST API accepteert `metafields` array direct op elk variant-object in de product creation payload
 - Variant size format: IB/SP = `"520x350"` (B×H in mm), MC = `"600"` (diameter in mm)
-- SP material labels komen uit `SP_MATERIALS` in `constants.ts`: G = Glas, BH0 = Brushed, BH4 = Brushed + 4mm
+- SP material labels komen uit `SP_MATERIALS` in `constants.ts`: G = Geen, BH0 = Boorgaten (6mm) geen afstandhouders, BH4 = Boorgaten (6mm) + 4 RVS afstandhouders. SP option 2 heet "Bevestigingsopties" (mounting options)
 
 ---
 
@@ -921,3 +921,103 @@ REVIEW → APPROVED transitie was niet exposed in de UI. Nu gebouwd:
   - SP → `design.splashFriendly === true`
   - MC → `design.circleFriendly === true`
 - Filter combineert met bestaande zoek (query) en status filter
+
+---
+
+## Session — 2026-03-28: Shopify publish timeout fix (parallelization)
+
+### Probleem
+Publish flow timed out ("The operation was aborted due to timeout") door ~37 sequentiële GraphQL calls in `pushTranslationsToShopify()` + sequentiële variant write-back + sequentiële post-publish steps.
+
+### Oplossing: 5 parallelisaties
+
+**`src/lib/shopify-translations.ts`** — 3 optimalisaties:
+1. **Metafield digest fetches**: 5 sequentiële `addMetafieldTranslation()` calls → `Promise.all()` (5 GraphQL calls parallel)
+2. **Metafield translation mutations**: sequentiële `for`-loop → `Promise.all()` (tot 5 mutations parallel)
+3. **Locale loop**: sequentiële DE→EN→FR → `Promise.allSettled()` (3 locales parallel, per-locale error handling behouden)
+
+**`src/lib/shopify.ts`** — 1 optimalisatie:
+4. **Variant write-back**: sequentiële `for`-loop over `shopifyProduct.variants` → `Promise.all()` met `.filter().map()` (tot 19 DB writes parallel voor IB)
+
+**`src/app/api/designs/[id]/publish/route.ts`** + **`src/app/api/workflow/bulk-publish/route.ts`** — 1 optimalisatie:
+5. **Post-publish pipeline**: translations + (DB status update → Notion write-back) lopen nu parallel via `Promise.all()`. Translations blijven non-fatal.
+
+### Impact
+- **Vóór**: ~37 sequentiële GraphQL calls + N sequentiële DB writes → 8-20+ seconden
+- **Na**: ~8 parallelle GraphQL calls + 1 parallelle DB batch → 2-5 seconden verwacht
+- Beide publish routes (single + bulk) profiteren van dezelfde optimalisaties
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+---
+
+## Session — 2026-03-28 (vervolg): Shopify consistency fixes
+
+### Probleem
+Audit van bestaande Shopify producten (manueel gepubliceerd) versus de `buildShopifyProduct()` output toonde 11 inconsistenties in product/variant velden.
+
+### Alle fixes toegepast
+
+**`src/lib/constants.ts`**:
+
+1. **SP_MATERIALS labels** — `Glas` → `Geen`, `Brushed` → `Boorgaten (6mm in elke hoek) - geen afstandhouders (+ € 5.00)`, `Brushed + 4mm` → `Boorgaten (6mm in elke hoek) + 4 RVS afstandhouders (+ € 15.00)`. Dit zijn bevestigingsopties (mounting options), niet materiaal namen.
+2. **IB_SIZES compareAt** — `compareAt` veld toegevoegd aan alle 19 entries. Waarden: 52×35→35.00, 59-62×52→49.00, 65-71×52→54.00, 76-83→54.00, 86-91.6→59.00.
+3. **MC_SIZES compareAtAdi/compareAtFrx** — `compareAtAdi` en `compareAtFrx` velden toegevoegd. Waarden: ø40→65.00/37.50, ø60→100.00/49.50, ø80→130.00/65.00, ø100→180.00/104.50.
+
+**`src/lib/shopify.ts`**:
+
+4. **SP `product_type`** — `'Spatscherm'` → `'Keuken Spatscherm'` (match met bestaande SP producten)
+5. **MC title separator** — hyphen-minus ` - ` → en dash ` – ` (U+2013) voor MC titels
+6. **SP title** — `{naam} Spatscherm` (niet `{naam} Keuken Spatscherm` — product_type en titellabel zijn bewust anders)
+7. **MC option 1 naam** — `'Diameter'` → `'Formaat'` (consistent met bestaande MC producten)
+8. **SP option 2 naam** — `'Materiaal'` → `'Bevestigingsopties'` (consistent met bestaande SP producten)
+9. **`template_suffix`** — toegevoegd per producttype: IB=`inductie-beschermers-cta`, MC=`muurcirkel`, SP=`spatwand-keuken`
+10. **`compare_at_price`** — toegevoegd aan IB en MC varianten (lookup uit `IB_SIZES.compareAt` en `MC_SIZES.compareAtAdi/compareAtFrx`). SP heeft geen compare_at.
+11. **`inventory_management`** — `'shopify'` → `null` (print-on-demand, geen inventaris tracking)
+12. **Weight** — `weight: v.weight * 1000` (grams) → `weight: v.weight ?? 0.3` (kg direct uit DB). `weight_unit: 'g'` → `weight_unit: 'kg'`.
+13. **`custom_label_0`** — toegevoegd aan variant metafields: `mm-google-shopping.custom_label_0` = producttype NL label (bijv. `'Inductie Beschermer'`)
+14. **Variant-level `condition`/`gender`/`age_group`** — toegevoegd aan variant metafields naast de bestaande product-level versies (bestaande Shopify producten hebben deze op beide niveaus)
+15. **`google_product_category`** — toegevoegd als product metafield: `mm-google-shopping.google_product_category` MC=`500044`, SP=`2901` (IB heeft geen categorie)
+16. **`updateShopifyProduct()`** — `google_product_category` upsert toegevoegd voor MC en SP
+
+### Metafield overzicht (bijgewerkt na consistency fixes)
+
+**Product metafields:**
+| Metafield | Type | Waarde |
+|---|---|---|
+| `custom.design_code` | single_line_text_field | designCode |
+| `custom.product_type` | single_line_text_field | IB/MC/SP |
+| `custom.manufacturer` | single_line_text_field | `"probo"` |
+| `custom.modelnaam` | single_line_text_field | designName |
+| `custom.color_plain` | single_line_text_field | `"Full-colour"` |
+| `custom.induction_compatible` | single_line_text_field | `"true"`/`"false"` |
+| `custom.material` | single_line_text_field | per producttype (IB/SP only) |
+| `custom.material_plain` | single_line_text_field | per producttype (IB/SP only) |
+| `custom.product_information` | rich_text_field | JSON rich text van description |
+| `custom.marketplace_description` | multi_line_text_field | HTML van longDescription |
+| `custom.google_description` | multi_line_text_field | googleShoppingDescription |
+| `mm-google-shopping.custom_product` | boolean | `"true"` |
+| `mm-google-shopping.condition` | single_line_text_field | `"new"` |
+| `mm-google-shopping.gender` | single_line_text_field | `"unisex"` |
+| `mm-google-shopping.age_group` | single_line_text_field | `"adult"` |
+| `mm-google-shopping.google_product_category` | single_line_text_field | MC=`500044`, SP=`2901` |
+| `global.title_tag` | single_line_text_field | seoTitle |
+| `global.description_tag` | single_line_text_field | seoDescription |
+
+**Variant metafields:**
+| Metafield | Type | Waarde |
+|---|---|---|
+| `custom.width_mm` / `custom.height_mm` | number_integer | IB/SP only |
+| `custom.diameter_mm` | number_integer | MC only |
+| `custom.materiaal` | single_line_text_field | per variant |
+| `custom.maateenheid` | single_line_text_field | `"cm"` |
+| `custom.product_breedte` | number_decimal | cm |
+| `custom.product_hoogte` | number_decimal | cm |
+| `custom.ean` | single_line_text_field | EAN-13 |
+| `mm-google-shopping.mpn` | single_line_text_field | SKU |
+| `mm-google-shopping.custom_label_0` | single_line_text_field | producttype NL label |
+| `mm-google-shopping.condition` | single_line_text_field | `"new"` |
+| `mm-google-shopping.gender` | single_line_text_field | `"unisex"` |
+| `mm-google-shopping.age_group` | single_line_text_field | `"adult"` |
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors

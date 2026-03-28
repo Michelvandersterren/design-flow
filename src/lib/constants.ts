@@ -51,27 +51,27 @@ export const PRODUCT_SKU_PREFIX = {
   SPLASH: 'SP',
 } as const
 
-// Standard IB (Inductiebeschermer) sizes in mm: { width, height, price (EUR), weightGrams, label }
+// Standard IB (Inductiebeschermer) sizes in mm: { width, height, price (EUR), compareAt, weightGrams, label }
 export const IB_SIZES = [
-  { width: 520,  height: 350, price: 33.50, weightGrams: 200, label: '52 × 35 cm' },
-  { width: 590,  height: 520, price: 33.50, weightGrams: 300, label: '59 × 52 cm' },
-  { width: 600,  height: 520, price: 33.50, weightGrams: 300, label: '60 × 52 cm' },
-  { width: 620,  height: 520, price: 33.50, weightGrams: 300, label: '62 × 52 cm' },
-  { width: 650,  height: 520, price: 34.50, weightGrams: 300, label: '65 × 52 cm' },
-  { width: 700,  height: 520, price: 34.50, weightGrams: 400, label: '70 × 52 cm' },
-  { width: 710,  height: 520, price: 34.50, weightGrams: 400, label: '71 × 52 cm' },
-  { width: 760,  height: 515, price: 35.50, weightGrams: 400, label: '76 × 51.5 cm' },
-  { width: 770,  height: 510, price: 35.50, weightGrams: 400, label: '77 × 51 cm' },
-  { width: 770,  height: 520, price: 35.50, weightGrams: 400, label: '77 × 52 cm' },
-  { width: 780,  height: 520, price: 35.50, weightGrams: 400, label: '78 × 52 cm' },
-  { width: 800,  height: 520, price: 36.50, weightGrams: 400, label: '80 × 52 cm' },
-  { width: 810,  height: 520, price: 36.50, weightGrams: 400, label: '81 × 52 cm' },
-  { width: 812,  height: 527, price: 36.50, weightGrams: 400, label: '81.2 × 52.7 cm' },
-  { width: 830,  height: 515, price: 36.50, weightGrams: 500, label: '83 × 51.5 cm' },
-  { width: 860,  height: 520, price: 37.50, weightGrams: 500, label: '86 × 52 cm' },
-  { width: 900,  height: 500, price: 37.50, weightGrams: 500, label: '90 × 50 cm' },
-  { width: 900,  height: 520, price: 37.50, weightGrams: 500, label: '90 × 52 cm' },
-  { width: 916,  height: 527, price: 37.50, weightGrams: 500, label: '91.6 × 52.7 cm' },
+  { width: 520,  height: 350, price: 33.50, compareAt: 35.00, weightGrams: 200, label: '52 × 35 cm' },
+  { width: 590,  height: 520, price: 33.50, compareAt: 49.00, weightGrams: 300, label: '59 × 52 cm' },
+  { width: 600,  height: 520, price: 33.50, compareAt: 49.00, weightGrams: 300, label: '60 × 52 cm' },
+  { width: 620,  height: 520, price: 33.50, compareAt: 49.00, weightGrams: 300, label: '62 × 52 cm' },
+  { width: 650,  height: 520, price: 34.50, compareAt: 54.00, weightGrams: 300, label: '65 × 52 cm' },
+  { width: 700,  height: 520, price: 34.50, compareAt: 54.00, weightGrams: 400, label: '70 × 52 cm' },
+  { width: 710,  height: 520, price: 34.50, compareAt: 54.00, weightGrams: 400, label: '71 × 52 cm' },
+  { width: 760,  height: 515, price: 35.50, compareAt: 54.00, weightGrams: 400, label: '76 × 51.5 cm' },
+  { width: 770,  height: 510, price: 35.50, compareAt: 54.00, weightGrams: 400, label: '77 × 51 cm' },
+  { width: 770,  height: 520, price: 35.50, compareAt: 54.00, weightGrams: 400, label: '77 × 52 cm' },
+  { width: 780,  height: 520, price: 35.50, compareAt: 54.00, weightGrams: 400, label: '78 × 52 cm' },
+  { width: 800,  height: 520, price: 36.50, compareAt: 54.00, weightGrams: 400, label: '80 × 52 cm' },
+  { width: 810,  height: 520, price: 36.50, compareAt: 54.00, weightGrams: 400, label: '81 × 52 cm' },
+  { width: 812,  height: 527, price: 36.50, compareAt: 54.00, weightGrams: 400, label: '81.2 × 52.7 cm' },
+  { width: 830,  height: 515, price: 36.50, compareAt: 54.00, weightGrams: 500, label: '83 × 51.5 cm' },
+  { width: 860,  height: 520, price: 37.50, compareAt: 59.00, weightGrams: 500, label: '86 × 52 cm' },
+  { width: 900,  height: 500, price: 37.50, compareAt: 59.00, weightGrams: 500, label: '90 × 50 cm' },
+  { width: 900,  height: 520, price: 37.50, compareAt: 59.00, weightGrams: 500, label: '90 × 52 cm' },
+  { width: 916,  height: 527, price: 37.50, compareAt: 59.00, weightGrams: 500, label: '91.6 × 52.7 cm' },
 ] as const
 
 // MC (Muurcirkel) materials. code = SKU segment, label = Shopify option value.
@@ -82,19 +82,21 @@ export const MC_MATERIALS = [
 
 // Standard MC (Muurcirkel) diameters in mm.
 // priceAdi / priceFrx = selling price per material.
+// compareAtAdi / compareAtFrx = compare-at (was) price per material.
 // suffix = SKU trailing number (1 for small, 2 for large).
 export const MC_SIZES = [
-  { diameter: 400,  priceAdi: 39.50, priceFrx: 29.50, weightGrams: 200, suffix: 1, label: 'ø 40 cm' },
-  { diameter: 600,  priceAdi: 54.50, priceFrx: 44.50, weightGrams: 350, suffix: 1, label: 'ø 60 cm' },
-  { diameter: 800,  priceAdi: 79.50, priceFrx: 59.50, weightGrams: 600, suffix: 2, label: 'ø 80 cm' },
-  { diameter: 1000, priceAdi: 120.00, priceFrx: 94.50, weightGrams: 900, suffix: 2, label: 'ø 100 cm' },
+  { diameter: 400,  priceAdi: 39.50, priceFrx: 29.50, compareAtAdi: 65.00, compareAtFrx: 37.50, weightGrams: 200, suffix: 1, label: 'ø 40 cm' },
+  { diameter: 600,  priceAdi: 54.50, priceFrx: 44.50, compareAtAdi: 100.00, compareAtFrx: 49.50, weightGrams: 350, suffix: 1, label: 'ø 60 cm' },
+  { diameter: 800,  priceAdi: 79.50, priceFrx: 59.50, compareAtAdi: 130.00, compareAtFrx: 65.00, weightGrams: 600, suffix: 2, label: 'ø 80 cm' },
+  { diameter: 1000, priceAdi: 120.00, priceFrx: 94.50, compareAtAdi: 180.00, compareAtFrx: 104.50, weightGrams: 900, suffix: 2, label: 'ø 100 cm' },
 ] as const
 
-// SP (Spatscherm) materials. priceOffset is added on top of the base (G) price.
+// SP (Spatscherm) mounting options. priceOffset is added on top of the base (G=Geen) price.
+// Labels match existing Shopify SP products (option "Bevestigingsopties").
 export const SP_MATERIALS = [
-  { code: 'G',   label: 'Glas',              priceOffset: 0  },
-  { code: 'BH0', label: 'Brushed',           priceOffset: 5  },
-  { code: 'BH4', label: 'Brushed + 4mm',     priceOffset: 15 },
+  { code: 'G',   label: 'Geen',                                                              priceOffset: 0  },
+  { code: 'BH0', label: 'Boorgaten (6mm in elke hoek) - geen afstandhouders (+ € 5.00)',     priceOffset: 5  },
+  { code: 'BH4', label: 'Boorgaten (6mm in elke hoek) + 4 RVS afstandhouders (+ € 15.00)',  priceOffset: 15 },
 ] as const
 
 // SP sizes. price = base price for Glas (G). BH0 = price+5, BH4 = price+15.

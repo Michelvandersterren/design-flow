@@ -179,11 +179,14 @@ async function pushTranslationsForLocale(
     }
   }
 
-  await addMetafieldTranslation('custom.product_information',      content.description,                   'value')
-  await addMetafieldTranslation('custom.marketplace_description',  toBodyHtml(content.longDescription),   'value')
-  await addMetafieldTranslation('global.title_tag',                content.seoTitle,                      'value')
-  await addMetafieldTranslation('global.description_tag',          content.seoDescription,                'value')
-  await addMetafieldTranslation('custom.google_description',       content.googleShoppingDescription,     'value')
+  // Fetch all metafield digests in parallel (was 5 sequential GraphQL calls)
+  await Promise.all([
+    addMetafieldTranslation('custom.product_information',      content.description,                   'value'),
+    addMetafieldTranslation('custom.marketplace_description',  toBodyHtml(content.longDescription),   'value'),
+    addMetafieldTranslation('global.title_tag',                content.seoTitle,                      'value'),
+    addMetafieldTranslation('global.description_tag',          content.seoDescription,                'value'),
+    addMetafieldTranslation('custom.google_description',       content.googleShoppingDescription,     'value'),
+  ])
 
   // Register product-level translations
   if (translations.length > 0) {
@@ -198,8 +201,8 @@ async function pushTranslationsForLocale(
     await shopifyGraphQL(mutation, { resourceId: productGid, translations })
   }
 
-  // Register metafield translations one by one
-  for (const mft of metafieldTranslations) {
+  // Register metafield translations in parallel (was sequential one-by-one)
+  if (metafieldTranslations.length > 0) {
     const mutation = `
       mutation RegisterTranslations($resourceId: ID!, $translations: [TranslationInput!]!) {
         translationsRegister(resourceId: $resourceId, translations: $translations) {
@@ -208,17 +211,21 @@ async function pushTranslationsForLocale(
         }
       }
     `
-    await shopifyGraphQL(mutation, {
-      resourceId: mft.gid,
-      translations: [
-        {
-          key: mft.key,
-          value: mft.value,
-          locale,
-          translatableContentDigest: mft.digest,
-        },
-      ],
-    })
+    await Promise.all(
+      metafieldTranslations.map((mft) =>
+        shopifyGraphQL(mutation, {
+          resourceId: mft.gid,
+          translations: [
+            {
+              key: mft.key,
+              value: mft.value,
+              locale,
+              translatableContentDigest: mft.digest,
+            },
+          ],
+        })
+      )
+    )
   }
 }
 
@@ -253,14 +260,23 @@ export async function pushTranslationsToShopify(
   const pushed: string[] = []
   const errors: Record<string, string> = {}
 
-  for (const content of translatedContent) {
-    if (!LOCALE_MAP[content.language]) continue // skip nl and unsupported locales
-    try {
+  // Push all locales in parallel (was sequential for-loop)
+  const localeContents = translatedContent.filter((c) => LOCALE_MAP[c.language])
+  const results = await Promise.allSettled(
+    localeContents.map(async (content) => {
       await pushTranslationsForLocale(shopifyProductId, content.language, content, metafieldMap)
-      pushed.push(content.language)
-    } catch (err) {
-      errors[content.language] = err instanceof Error ? err.message : String(err)
-      console.error(`Translation push failed for ${content.language}:`, err)
+      return content.language
+    })
+  )
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]
+    const lang = localeContents[i].language
+    if (result.status === 'fulfilled') {
+      pushed.push(lang)
+    } else {
+      errors[lang] = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      console.error(`Translation push failed for ${lang}:`, result.reason)
     }
   }
 

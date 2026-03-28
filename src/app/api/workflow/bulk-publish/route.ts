@@ -87,33 +87,38 @@ export async function POST(request: NextRequest) {
     try {
       const result = await createShopifyProduct(design.id)
 
-      // Push translations (DE/EN/FR) — non-fatal
-      try {
-        const translatedContent = await prisma.content.findMany({
-          where: { designId: design.id, language: { in: ['de', 'en', 'fr'] } },
-          select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
-        })
-        if (translatedContent.length > 0) {
-          await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
-        }
-      } catch (translationError) {
-        console.error(`Translation push failed for ${design.designCode} (non-fatal):`, translationError)
-      }
-
-      // Set design status to LIVE
-      const updated = await prisma.design.update({
-        where: { id: design.id },
-        data: { status: 'LIVE' },
-      })
-
-      // Write back to Notion if notionId is available
-      if (updated.notionId) {
+      // Run translations and DB+Notion updates in parallel
+      const translationPromise = (async () => {
         try {
-          await markDesignLiveInNotion(updated.notionId, result.shopifyProductHandle)
-        } catch (notionError) {
-          console.error(`Notion write-back failed for ${design.designCode} (non-fatal):`, notionError)
+          const translatedContent = await prisma.content.findMany({
+            where: { designId: design.id, language: { in: ['de', 'en', 'fr'] } },
+            select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
+          })
+          if (translatedContent.length > 0) {
+            await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
+          }
+        } catch (translationError) {
+          console.error(`Translation push failed for ${design.designCode} (non-fatal):`, translationError)
         }
-      }
+      })()
+
+      const dbAndNotionPromise = (async () => {
+        // Set design status to LIVE
+        const updated = await prisma.design.update({
+          where: { id: design.id },
+          data: { status: 'LIVE' },
+        })
+        // Write back to Notion if notionId is available
+        if (updated.notionId) {
+          try {
+            await markDesignLiveInNotion(updated.notionId, result.shopifyProductHandle)
+          } catch (notionError) {
+            console.error(`Notion write-back failed for ${design.designCode} (non-fatal):`, notionError)
+          }
+        }
+      })()
+
+      await Promise.all([translationPromise, dbAndNotionPromise])
 
       results.push({
         designId: design.id,

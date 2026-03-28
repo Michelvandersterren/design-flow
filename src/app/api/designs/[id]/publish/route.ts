@@ -4,6 +4,8 @@ import { pushTranslationsToShopify } from '@/lib/shopify-translations'
 import { markDesignLiveInNotion } from '@/lib/notion'
 import { prisma } from '@/lib/prisma'
 
+export const maxDuration = 180 // 3 minutes — Shopify downloads all mockup images server-side
+
 /**
  * POST /api/designs/[id]/publish
  * Create a draft product on Shopify from a design.
@@ -30,34 +32,40 @@ export async function POST(
   try {
     const result = await createShopifyProduct(designId)
 
-    // Push translations (DE/EN/FR) to Shopify — non-fatal
-    try {
-      const translatedContent = await prisma.content.findMany({
-        where: { designId, language: { in: ['de', 'en', 'fr'] } },
-        select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
-      })
-      if (translatedContent.length > 0) {
-        await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
-      }
-    } catch (translationError) {
-      console.error('Translation push failed (non-fatal):', translationError)
-    }
-
-    // Set design status to LIVE in DB
-    const design = await prisma.design.update({
-      where: { id: designId },
-      data: { status: 'LIVE' },
-    })
-
-    // Write back to Notion if notionId is available
-    if (design.notionId) {
+    // Run translations and DB+Notion updates in parallel.
+    // Translations are non-fatal; DB status and Notion write-back are independent of translations.
+    const translationPromise = (async () => {
       try {
-        await markDesignLiveInNotion(design.notionId, result.shopifyProductHandle)
-      } catch (notionError) {
-        // Log but don't fail the response — Shopify publish succeeded
-        console.error('Notion write-back failed (non-fatal):', notionError)
+        const translatedContent = await prisma.content.findMany({
+          where: { designId, language: { in: ['de', 'en', 'fr'] } },
+          select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
+        })
+        if (translatedContent.length > 0) {
+          await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
+        }
+      } catch (translationError) {
+        console.error('Translation push failed (non-fatal):', translationError)
       }
-    }
+    })()
+
+    const dbAndNotionPromise = (async () => {
+      // Set design status to LIVE in DB
+      const design = await prisma.design.update({
+        where: { id: designId },
+        data: { status: 'LIVE' },
+      })
+      // Write back to Notion if notionId is available
+      if (design.notionId) {
+        try {
+          await markDesignLiveInNotion(design.notionId, result.shopifyProductHandle)
+        } catch (notionError) {
+          console.error('Notion write-back failed (non-fatal):', notionError)
+        }
+      }
+      return design
+    })()
+
+    const [, design] = await Promise.all([translationPromise, dbAndNotionPromise])
 
     return NextResponse.json({
       success: true,
