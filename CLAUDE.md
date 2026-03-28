@@ -1021,3 +1021,36 @@ Audit van bestaande Shopify producten (manueel gepubliceerd) versus de `buildSho
 | `mm-google-shopping.age_group` | single_line_text_field | `"adult"` |
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+---
+
+## Session — 2026-03-28 (vervolg): Variant ordering, color_plain, long_description metafield
+
+### Changes committed (e1d9be0, pushed)
+
+**`src/lib/shopify.ts`**:
+
+1. **Variant ordering fixed** — Prisma `orderBy: { size: 'asc' }` sorteerde strings alfabetisch (`"1000" < "400"`). Vervangen door in-code sort in `buildShopifyProduct()`: `material ASC` dan `size numeric ASC`. MC varianten staan nu correct: alle ADI maten oplopend, dan alle FRX maten oplopend (ø40 ADI → ø60 → ø80 → ø100 → ø40 FRX → ø60 → ø80 → ø100).
+
+2. **`color_plain` from colorTags** — Was hardcoded `'Full-colour'`. Nu: komma-gescheiden capitalized `colorTags` uit design (bijv. `"Lichtblauw, Oranje, Bruin, Beige, Groen, Lichtroze"`). Consistent met bestaande manueel gepubliceerde producten. Toegepast in zowel `buildShopifyProduct()` als `updateShopifyProduct()`.
+
+3. **`custom.long_description` metafield toegevoegd** — Nieuw `rich_text_field` metafield gevuld vanuit `longDescription` via `toRichText()`. Toegevoegd in `buildShopifyProduct()`, `updateShopifyProduct()` en `shopify-translations.ts` (vertalingen).
+
+**`src/lib/shopify-translations.ts`**:
+- `custom.long_description` opgenomen in translation push per locale (DE/EN/FR)
+
+**`src/app/designs/[id]/page.tsx`**:
+- Content tab: `color_plain` preview toont nu dynamische waarde uit colorTags
+- Content tab: `custom.long_description` preview rij toegevoegd in metafield sectie
+
+### Metafield tabel updates
+
+**Product metafields (gewijzigd):**
+| Metafield | Type | Waarde (nieuw) |
+|---|---|---|
+| `custom.color_plain` | single_line_text_field | Komma-gescheiden colorTags (was: `"Full-colour"`) |
+| `custom.long_description` | rich_text_field | JSON rich text van longDescription **(nieuw)** |
+
+### Openstaand na deze sessie
+- Test product `10297656967510` (Farm Reflectie Herfst MC) staat als DRAFT op Shopify met correcte structuur
+- Oudere test producten mogelijk nog aanwezig: `10297428607318` (IB), `10297482281302` (SP) — opruimen
