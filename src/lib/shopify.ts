@@ -65,12 +65,19 @@ export async function buildShopifyProduct(designId: string) {
     where: { id: designId },
     include: {
       content: true,
-      variants: { orderBy: [{ productType: 'asc' }, { size: 'asc' }] },
+      variants: true,
       mockups: { orderBy: { createdAt: 'asc' } },
     },
   })
 
   if (!design) throw new Error(`Design not found: ${designId}`)
+
+  // Sort variants: material ASC (ADI < FRX < G < BH0 < BH4), then size numeric ASC
+  design.variants.sort((a, b) => {
+    const matOrder = (a.material ?? '').localeCompare(b.material ?? '')
+    if (matOrder !== 0) return matOrder
+    return (Number(a.size) || 0) - (Number(b.size) || 0)
+  })
 
   const nlContent = design.content.find((c) => c.language === 'nl')
   if (!nlContent) throw new Error('Dutch content required before publishing to Shopify')
@@ -115,6 +122,10 @@ export async function buildShopifyProduct(designId: string) {
   if (design.styleFamily) tags.push(design.styleFamily)
   tags.push(...parseField(design.collections))
   tags.push(...parseField(design.colorTags))
+
+  // Build color_plain from colorTags (e.g. "Lichtblauw, Oranje, Bruin")
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  const colorPlain = parseField(design.colorTags).map(capitalize).join(', ') || 'Multicolor'
 
   // Lookup helpers for SP labels
   const spSizeLabel = (size: string): string => {
@@ -283,7 +294,7 @@ export async function buildShopifyProduct(designId: string) {
         { namespace: 'custom', key: 'product_type',         value: firstType ?? '',                                 type: 'single_line_text_field' },
         { namespace: 'custom', key: 'manufacturer',         value: 'probo',                                         type: 'single_line_text_field' },
         { namespace: 'custom', key: 'modelnaam',            value: design.designName,                               type: 'single_line_text_field' },
-        { namespace: 'custom', key: 'color_plain',          value: 'Full-colour',                                   type: 'single_line_text_field' },
+        { namespace: 'custom', key: 'color_plain',          value: colorPlain,                                      type: 'single_line_text_field' },
         { namespace: 'custom', key: 'induction_compatible', value: String(design.inductionFriendly ?? false),       type: 'single_line_text_field' },
         ...(firstType && PRODUCT_MATERIAL[firstType]
           ? [{ namespace: 'custom', key: 'material',        value: PRODUCT_MATERIAL[firstType],                     type: 'single_line_text_field' }]
@@ -296,6 +307,9 @@ export async function buildShopifyProduct(designId: string) {
           : []),
         ...(nlContent.longDescription
           ? [{ namespace: 'custom', key: 'marketplace_description', value: toBodyHtml(nlContent.longDescription),   type: 'multi_line_text_field' }]
+          : []),
+        ...(nlContent.longDescription
+          ? [{ namespace: 'custom', key: 'long_description',        value: toRichText(nlContent.longDescription),   type: 'rich_text_field' }]
           : []),
         ...(nlContent.googleShoppingDescription
           ? [{ namespace: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription,      type: 'multi_line_text_field' }]
@@ -435,6 +449,18 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
 
   const firstType = design.variants[0]?.productType
 
+  // Build color_plain from colorTags
+  const parseField = (value: string | null): string[] => {
+    if (!value) return []
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
+    } catch {}
+    return value.split(',').map((s) => s.trim()).filter(Boolean)
+  }
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  const colorPlain = parseField(design.colorTags).map(capitalize).join(', ') || 'Multicolor'
+
   // Convert plain-text description to HTML paragraphs for Shopify
   const toBodyHtml = (text: string | null): string => {
     if (!text) return ''
@@ -498,7 +524,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   // 3. Upsert static product metafields
   await upsertMetafield('custom', 'manufacturer',          'probo',                                           'single_line_text_field')
   await upsertMetafield('custom', 'modelnaam',             design.designName,                                 'single_line_text_field')
-  await upsertMetafield('custom', 'color_plain',           'Full-colour',                                     'single_line_text_field')
+  await upsertMetafield('custom', 'color_plain',           colorPlain,                                        'single_line_text_field')
   await upsertMetafield('custom', 'induction_compatible',  String(design.inductionFriendly ?? false),         'single_line_text_field')
   if (firstType) {
     await upsertMetafield('custom', 'product_type', firstType, 'single_line_text_field')
@@ -516,6 +542,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   }
   if (nlContent.longDescription) {
     await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
+    await upsertMetafield('custom', 'long_description',        toRichText(nlContent.longDescription),          'rich_text_field')
   }
   if (nlContent.googleShoppingDescription) {
     await upsertMetafield('custom', 'google_description',      nlContent.googleShoppingDescription,            'multi_line_text_field')

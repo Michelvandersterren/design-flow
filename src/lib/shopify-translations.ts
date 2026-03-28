@@ -183,6 +183,7 @@ async function pushTranslationsForLocale(
   await Promise.all([
     addMetafieldTranslation('custom.product_information',      content.description,                   'value'),
     addMetafieldTranslation('custom.marketplace_description',  toBodyHtml(content.longDescription),   'value'),
+    addMetafieldTranslation('custom.long_description',         content.longDescription,               'value'),
     addMetafieldTranslation('global.title_tag',                content.seoTitle,                      'value'),
     addMetafieldTranslation('global.description_tag',          content.seoDescription,                'value'),
     addMetafieldTranslation('custom.google_description',       content.googleShoppingDescription,     'value'),

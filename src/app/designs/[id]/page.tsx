@@ -1315,13 +1315,18 @@ export default function DesignDetail() {
             const fields: { label: string; ns: string; key: string; value: string | null }[] = [
               { label: 'custom.manufacturer',          ns: 'custom', key: 'manufacturer',          value: 'probo' },
               { label: 'custom.modelnaam',              ns: 'custom', key: 'modelnaam',              value: design.designName },
-              { label: 'custom.color_plain',            ns: 'custom', key: 'color_plain',            value: 'Full-colour' },
+              { label: 'custom.color_plain',            ns: 'custom', key: 'color_plain',            value: (() => {
+                const parseF = (v: string | null): string[] => { if (!v) return []; try { const p = JSON.parse(v); if (Array.isArray(p)) return p.map(String).filter(Boolean) } catch {} return v.split(',').map(s => s.trim()).filter(Boolean) }
+                const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+                return parseF(design.colorTags).map(cap).join(', ') || 'Multicolor'
+              })() },
               { label: 'custom.google_custom_product',  ns: 'custom', key: 'google_custom_product',  value: 'True' },
               { label: 'custom.material',               ns: 'custom', key: 'material',               value: firstType ? (materialFull[firstType] ?? null) : null },
               { label: 'custom.material_plain',         ns: 'custom', key: 'material_plain',         value: firstType ? (materialPlain[firstType] ?? null) : null },
               { label: 'custom.beschrijving_afbeelding',ns: 'custom', key: 'beschrijving_afbeelding',value: firstMockupFileId },
               { label: 'custom.product_information',    ns: 'custom', key: 'product_information',    value: nlContent.description },
               { label: 'custom.marketplace_description',ns: 'custom', key: 'marketplace_description',value: nlContent.longDescription ? '(HTML versie van lange beschrijving)' : null },
+              { label: 'custom.long_description',      ns: 'custom', key: 'long_description',      value: nlContent.longDescription ? '(Rich text versie van lange beschrijving)' : null },
               { label: 'custom.google_description',     ns: 'custom', key: 'google_description',     value: nlContent.googleShoppingDescription },
               { label: 'global.title_tag',              ns: 'global', key: 'title_tag',              value: nlContent.seoTitle },
               { label: 'global.description_tag',        ns: 'global', key: 'description_tag',        value: nlContent.seoDescription },
