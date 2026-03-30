@@ -109,24 +109,26 @@ export default function ReviewPage() {
 
     setBulkApproving(true)
     try {
-      // Fetch all REVIEW designs (not just current page)
+      // Fetch all REVIEW design IDs (not just current page)
       const allRes = await fetch('/api/designs?status=REVIEW&limit=100')
       const allData = await allRes.json()
-      const reviewDesigns = allData.designs || []
+      const designIds = (allData.designs || []).map((d: any) => d.id)
 
-      await Promise.all(
-        reviewDesigns.map((d: any) =>
-          fetch(`/api/designs/${d.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'APPROVED' }),
-          })
-        )
-      )
+      if (designIds.length === 0) return
+
+      const bulkRes = await fetch('/api/designs/bulk-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ designIds, status: 'APPROVED' }),
+      })
+      if (!bulkRes.ok) {
+        const err = await bulkRes.json()
+        throw new Error(err.error || 'Bulk goedkeuren mislukt')
+      }
       setSelectedId(null)
       await fetchData()
-    } catch {
-      alert('Bulk goedkeuren mislukt')
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Bulk goedkeuren mislukt')
     } finally {
       setBulkApproving(false)
     }

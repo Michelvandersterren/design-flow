@@ -13,7 +13,9 @@
     "db:seed": "tsx prisma/seed.ts",
     "export-mockups": "node scripts/export-mockup-templates.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:all": "vitest run && vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

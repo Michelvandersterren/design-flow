@@ -52,8 +52,12 @@ export async function generateNextEan(): Promise<string> {
     select: { ean: true },
   })
 
-  const maxEan = result?.ean ? parseInt(result.ean, 10) : SEED_LAST_EAN
-  const nextBase12 = String(maxEan + 1).slice(0, 12)
+  // Extract the 12-digit base from the highest EAN (or from the seed)
+  // and increment that — NOT the full 13-digit EAN, which includes
+  // the check digit and would produce duplicates when recalculated.
+  const maxEanStr = result?.ean ?? String(SEED_LAST_EAN)
+  const maxBase12 = parseInt(maxEanStr.slice(0, 12), 10)
+  const nextBase12 = String(maxBase12 + 1)
 
   // Safety check: ensure we stay within the GS1 prefix range
   if (!nextBase12.startsWith(GS1_PREFIX)) {
