@@ -31,9 +31,14 @@ export async function POST(
       return NextResponse.json({ error: 'Brondesign niet gevonden' }, { status: 404 })
     }
 
+    // Strip bestaande producttype-suffix van naam en code zodat er geen
+    // dubbele suffixen ontstaan (bijv. "Name (IB) (SP)" of "CODE-IB-SP").
+    const cleanName = source.designName.replace(/\s*\((IB|SP|MC)\)$/i, '')
+    const cleanCode = source.designCode.replace(/-(IB|SP|MC)$/i, '')
+
     // Genereer een suffix voor code/naam zodat er geen collision is
     const suffix = `-${targetType}`
-    const newCode = (source.designCode + suffix).slice(0, 20).toUpperCase()
+    const newCode = (cleanCode + suffix).slice(0, 20).toUpperCase()
 
     // Check of er al een design bestaat met deze code
     const existing = await prisma.design.findFirst({ where: { designCode: newCode } })
@@ -47,7 +52,7 @@ export async function POST(
     const newDesign = await prisma.design.create({
       data: {
         designCode: newCode,
-        designName: `${source.designName} (${targetType})`,
+        designName: `${cleanName} (${targetType})`,
         designType: targetType,
         styleFamily: source.styleFamily,
         collections: source.collections,

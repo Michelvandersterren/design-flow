@@ -24,15 +24,21 @@ const PRODUCT_TYPE_CUSTOM_LABEL: Record<string, string> = {
   SP: 'Spatscherm',
 }
 
-// Shopify product taxonomy node IDs per product type
-// IB: Cooktop Protectors (Home & Garden > Kitchen & Dining > ...)
-// MC: Visual Artwork (Home & Garden > Decor > Artwork > ...)
-// SP: Wall Paneling (closest match — decorative kitchen panel)
+// Shopify product taxonomy category IDs per product type.
+// These use the TaxonomyCategory GID format required by the GraphQL `category` field
+// (available from API version 2025-01+). Verified against manually-created reference products.
+// IB: Cooktop Protectors (Home & Garden > Kitchen & Dining > Kitchen Appliance Accessories > ...)
+// MC: Visual Artwork (Home & Garden > Decor > Artwork > Posters, Prints, & Visual Artwork > ...)
+// SP: Kitchen Appliance Accessories (Home & Garden > Kitchen & Dining > ...)
 const PRODUCT_CATEGORY_ID: Record<string, string> = {
-  IB: 'gid://shopify/ProductTaxonomyNode/10641',
-  MC: 'gid://shopify/ProductTaxonomyNode/10370',
-  SP: 'gid://shopify/ProductTaxonomyNode/10370', // Visual Artwork, same as MC for now
+  IB: 'gid://shopify/TaxonomyCategory/hg-11-6-3-2',
+  MC: 'gid://shopify/TaxonomyCategory/hg-3-4-2-3',
+  SP: 'gid://shopify/TaxonomyCategory/hg-11-6',
 }
+
+// The `category` field on ProductInput requires API version 2025-01+.
+// The REST API version may be older, so we hardcode this for category mutations.
+const GRAPHQL_CATEGORY_API_VERSION = '2025-01'
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
@@ -69,13 +75,15 @@ async function shopifyFetch(path: string, options: RequestInit & { timeoutMs?: n
 
 /**
  * Execute a Shopify GraphQL Admin API mutation/query.
+ * @param apiVersion — override API version (e.g. for category mutations that need 2025-01+)
  */
-async function shopifyGraphQL(query: string, variables: Record<string, unknown> = {}) {
+async function shopifyGraphQL(query: string, variables: Record<string, unknown> = {}, apiVersion?: string) {
   if (!SHOPIFY_ACCESS_TOKEN) {
     throw new Error('SHOPIFY_ACCESS_TOKEN is not configured')
   }
 
-  const url = `https://${SHOPIFY_STORE_URL}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`
+  const ver = apiVersion ?? SHOPIFY_API_VERSION
+  const url = `https://${SHOPIFY_STORE_URL}/admin/api/${ver}/graphql.json`
   const response = await fetch(url, {
     method: 'POST',
     signal: AbortSignal.timeout(30000),
@@ -142,8 +150,9 @@ export async function buildShopifyProduct(designId: string) {
   // IB: "{naam} - Inductie Beschermer" (hyphen-minus)
   // MC: "{naam} – Muurcirkel" (en dash)
   // SP: "{naam} Spatscherm" (no separator, product_type is "Keuken Spatscherm" but title uses "Spatscherm")
-  // Strip "(IB)", "(SP)", "(MC)" suffix from forked design names
-  const cleanName = design.designName.replace(/\s*\((IB|SP|MC)\)$/i, '')
+  // Strip ALL "(IB)", "(SP)", "(MC)" suffixes from forked design names.
+  // Uses global flag to handle names with multiple suffixes (e.g. from double forks).
+  const cleanName = design.designName.replace(/\s*\((IB|SP|MC)\)/gi, '').trim()
   const productTitle =
     firstType === 'SP'
       ? `${cleanName} Spatscherm`
@@ -347,10 +356,18 @@ export async function buildShopifyProduct(designId: string) {
   const findMockup = (templateId: string): ImageEntry | null => {
     const m = mockupMap.get(templateId)
     if (!m) return null
+    // For IB size-specific mockups, normalize the sizeKey through IB_SIZE_KEY_ALIASES
+    // so it matches the PSD sizeKey used by variant assignment. The DB stores the
+    // original variant sizeKey (e.g. "620x520") but we need the canonical PSD key
+    // (e.g. "590x500") for the image→variant matching to work.
+    let sizeKey = m.sizeKey ?? undefined
+    if (sizeKey && firstType === 'IB') {
+      sizeKey = IB_SIZE_KEY_ALIASES[sizeKey] ?? sizeKey
+    }
     return {
       src: getDriveDirectUrl(m.driveFileId, true),
       alt: m.altText ?? undefined,
-      sizeKey: m.sizeKey ?? undefined,
+      sizeKey,
     }
   }
 
@@ -371,10 +388,10 @@ export async function buildShopifyProduct(designId: string) {
       if (img) images.push(img)
     }
   } else if (firstType === 'SP') {
-    // Hero: first sfeer mockup, duplicated
-    const hero = findMockup('SP-mockup1')
+    // Hero: largest size-specific product shot (120x80), uploaded as generic (no variant assignment)
+    const hero = findMockup('SP-mockup4-120x80')
     if (hero) images.push({ ...hero, sizeKey: undefined, isHeroDuplicate: true })
-    // Generic sfeer mockups (SP-mockup1 appears again as the real image)
+    // Generic sfeer mockups
     for (const tid of SP_GENERIC_ORDER) {
       const img = findMockup(tid)
       if (img) images.push(img)
@@ -662,7 +679,7 @@ export async function createShopifyProduct(designId: string) {
 
   // ---------------------------------------------------------------------------
   // Set product category via GraphQL (REST API doesn't support this).
-  // This maps to the Shopify product taxonomy for proper classification.
+  // The `category` field on ProductInput requires API version 2025-01+.
   // ---------------------------------------------------------------------------
   const categoryId = firstType ? PRODUCT_CATEGORY_ID[firstType] : undefined
   if (categoryId) {
@@ -672,29 +689,21 @@ export async function createShopifyProduct(designId: string) {
       await shopifyGraphQL(
         `mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
-            product { id productCategory { productTaxonomyNode { id name } } }
+            product { id category { id name } }
             userErrors { field message }
           }
         }`,
-        { input: { id: productGid, productCategory: { productTaxonomyNodeId: categoryId } } }
+        { input: { id: productGid, category: categoryId } },
+        GRAPHQL_CATEGORY_API_VERSION
       )
     } catch (err) {
       console.error(`[Shopify] Failed to set product category (non-fatal):`, err)
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Activate the product so it is published to all sales channels.
-  // The product was created as "draft" to prevent premature visibility while
-  // images were still uploading. Setting status to "active" publishes it to
-  // the online store and any other sales channels configured in Shopify.
-  // ---------------------------------------------------------------------------
-  console.log(`[Shopify] Activating product ${shopifyProductId}`)
-  await shopifyFetch(`/products/${shopifyProductId}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ product: { id: shopifyProductId, status: 'active', published: true } }),
-  })
-  console.log(`[Shopify] Product ${shopifyProductId} is now active`)
+  // Product stays as DRAFT so it can be reviewed before going live.
+  // Activation is done manually in Shopify admin or via the design-flow UI.
+  console.log(`[Shopify] Product ${shopifyProductId} created as draft — review before activating`)
 
   return {
     shopifyProductId,
@@ -749,7 +758,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   })
 
   // ---------------------------------------------------------------------------
-  // 2. Update product category via GraphQL
+  // 2. Update product category via GraphQL (requires API version 2025-01+)
   // ---------------------------------------------------------------------------
   const categoryId = firstType ? PRODUCT_CATEGORY_ID[firstType] : undefined
   if (categoryId) {
@@ -759,11 +768,12 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
       await shopifyGraphQL(
         `mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
-            product { id productCategory { productTaxonomyNode { id name } } }
+            product { id category { id name } }
             userErrors { field message }
           }
         }`,
-        { input: { id: productGid, productCategory: { productTaxonomyNodeId: categoryId } } }
+        { input: { id: productGid, category: categoryId } },
+        GRAPHQL_CATEGORY_API_VERSION
       )
     } catch (err) {
       console.error(`[Shopify Update] Failed to set product category (non-fatal):`, err)

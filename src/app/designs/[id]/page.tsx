@@ -739,10 +739,10 @@ export default function DesignDetail() {
           <div style={{ display: 'flex', gap: 0, marginTop: 12, borderTop: '1px solid #f3f4f6' }}>
             {([
               { id: 'overview',    label: 'Overzicht' },
+              { id: 'variants',    label: 'Varianten' },
               { id: 'mockups',     label: 'Mockups' },
               { id: 'printfiles',  label: 'Printbestanden' },
               { id: 'content',     label: 'Content' },
-              { id: 'variants',    label: 'Varianten' },
             ] as { id: TabId; label: string }[]).map((tab) => {
               const badge = tabBadges[tab.id]
               const active = activeTab === tab.id

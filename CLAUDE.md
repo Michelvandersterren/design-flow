@@ -1148,3 +1148,61 @@ Ad-hoc navigatie verwijderd nu sidebar beschikbaar is:
 - Root cause: Claude zag em-dashes in de brand voice voorbeelden en bootste ze na, ondanks de instructie "geen em-dashes"
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+## Session — 2026-03-30 (vervolg): 6 Shopify publish pipeline fixes (NLSNVG vergelijking)
+
+Vergelijking van app-gepubliceerde NLSNVG producten (IB + SP) met handmatig aangemaakte referentieproducten (Almond Granite IB, Arctic Granite SP) leverde 6 bugs op. Alle fixes in `src/lib/shopify.ts` tenzij anders vermeld.
+
+### 1. Product category GID-formaat (create + update flow)
+
+- **Oud**: `productCategory: { productTaxonomyNodeId: "gid://shopify/ProductTaxonomyNode/..." }` — silently ignored door Shopify
+- **Nieuw**: `category: "gid://shopify/TaxonomyCategory/..."` — correct `ProductInput` veld
+- `category` veld vereist API versie 2025-01+. Nieuwe constante `GRAPHQL_CATEGORY_API_VERSION = '2025-01'` en optionele `apiVersion` parameter op `shopifyGraphQL()`
+- Correcte GIDs geverifieerd tegen handmatige referentieproducten:
+  - IB: `hg-11-6-3-2` (Cooktop Protectors)
+  - MC: `hg-3-4-2-3` (Visual Artwork)
+  - SP: `hg-11-6` (Kitchen Appliance Accessories)
+
+### 2. Publish status — producten blijven DRAFT
+
+- Auto-activatie verwijderd (de `PUT /products/{id}.json` call met `status: 'active', published: true`)
+- Producten blijven nu als DRAFT staan voor review voordat ze live gaan
+
+### 3. cleanName regex — globale suffix-strip
+
+- **Oud**: `/\s*\((IB|SP|MC)\)$/i` — alleen trailing suffix
+- **Nieuw**: `/\s*\((IB|SP|MC)\)/gi` + `.trim()` — alle type-suffixen verwijderd
+- Voorkomt dubbele suffixen in titels bij multi-fork designs (bijv. "Name (IB) (SP)" wordt "Name")
+
+### 4. IB variant image sizeKey aliasing
+
+- `findMockup()` normaliseert nu sizeKeys via `IB_SIZE_KEY_ALIASES` wanneer `firstType === 'IB'`
+- Root cause: mockupMap had raw DB sizeKey (bijv. `620x520`) maar variant assignment verwacht de canonical PSD sizeKey (bijv. `590x500`). Zonder normalisatie werden variant images niet gekoppeld
+
+### 5. SP hero image — product shot ipv lifestyle
+
+- **Oud**: `SP-mockup1` (sfeer-keuken-1 lifestyle shot)
+- **Nieuw**: `SP-mockup4-120x80` (grootste product shot)
+- Consistent met IB-patroon waar hero de grootste product shot is
+
+### 6. `shopifyGraphQL()` API version override
+
+- Nieuwe optionele derde parameter `apiVersion?: string`
+- Gebruikt door category mutations die 2025-01+ vereisen terwijl REST API op 2024-04 draait
+
+### Fork route — dubbele suffix preventie
+
+**`src/app/api/designs/[id]/fork/route.ts`**:
+- Bestaande type-suffixen worden nu gestript van zowel `designName` als `designCode` voor de nieuwe suffix wordt toegevoegd
+- Voorkomt codes als `NLSNVG-IB-SP` en namen als `Nile Sunset Voyage (IB) (SP)`
+
+### Tab volgorde fix
+
+**`src/app/designs/[id]/page.tsx`**:
+- Volgorde gewijzigd naar: Overzicht, Varianten, Mockups, Printbestanden, Content
+- Varianten logisch na Overzicht geplaatst (was als laatste)
+
+### Live Shopify fixes (via API, niet in code)
+
+- IB product `10300254880086`: category gezet naar Cooktop Protectors
+- SP product `10300257239382`: category gezet + titel gecorrigeerd van "Nile Sunset Voyage (IB) Spatscherm" naar "Nile Sunset Voyage Spatscherm"
