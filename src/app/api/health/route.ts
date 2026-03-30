@@ -71,6 +71,8 @@ export interface HealthResponse {
   issueLabels: Record<IssueCode, string>
   totalWithIssues: number
   totalHealthy: number
+  totalExcluded: number
+  includeAll: boolean
 }
 
 // Required NL content fields
@@ -147,12 +149,28 @@ function detectIssues(design: any): { issues: IssueCode[]; failedSteps: string[]
   return { issues, failedSteps }
 }
 
+/**
+ * A design is relevant for the health check if it has been touched by our
+ * pipeline (has driveFileId, content, or variants) OR is in an active
+ * workflow status. LIVE designs with no pipeline data are legacy imports
+ * that already exist on Shopify outside of our workflow.
+ */
+function isRelevantForHealthCheck(design: any): boolean {
+  const activeStatuses = ['DRAFT', 'REVIEW', 'APPROVED', 'CONTENT_GENERATING', 'PUBLISHING', 'FAILED']
+  if (activeStatuses.includes(design.status)) return true
+  if (design.driveFileId) return true
+  if (design.content.length > 0) return true
+  if (design.variants.length > 0) return true
+  return false
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const issueFilter = searchParams.get('issue') as IssueCode | null
     const statusFilter = searchParams.get('status')
     const search = searchParams.get('search')
+    const includeAll = searchParams.get('includeAll') === 'true'
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)))
 
@@ -179,8 +197,15 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Compute issues for every design
-    const allHealthDesigns: DesignHealth[] = allDesigns.map((d) => {
+    // Split into relevant designs (pipeline-touched) and excluded (legacy LIVE imports)
+    const relevantDesigns = allDesigns.filter(isRelevantForHealthCheck)
+    const totalExcluded = allDesigns.length - relevantDesigns.length
+
+    // Use relevant designs for health checks, unless includeAll is set
+    const designsToCheck = includeAll ? allDesigns : relevantDesigns
+
+    // Compute issues for checked designs
+    const allHealthDesigns: DesignHealth[] = designsToCheck.map((d) => {
       const { issues, failedSteps } = detectIssues(d)
       return {
         id: d.id,
@@ -231,7 +256,9 @@ export async function GET(request: NextRequest) {
       summary: summary as Record<IssueCode, number>,
       issueLabels: ISSUE_LABELS,
       totalWithIssues,
-      totalHealthy: allDesigns.length - totalWithIssues,
+      totalHealthy: designsToCheck.length - totalWithIssues,
+      totalExcluded,
+      includeAll,
     } satisfies HealthResponse)
   } catch (error) {
     console.error('Error in health check:', error)

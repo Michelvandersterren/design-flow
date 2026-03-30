@@ -68,6 +68,7 @@ export default function HealthPage() {
   const [search, setSearch] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
   const [page, setPage] = useState(1)
+  const [includeAll, setIncludeAll] = useState(false)
 
   // Debounce search
   useEffect(() => {
@@ -78,7 +79,7 @@ export default function HealthPage() {
   // Reset page on filter changes
   useEffect(() => {
     setPage(1)
-  }, [issueFilter, statusFilter, searchDebounced])
+  }, [issueFilter, statusFilter, searchDebounced, includeAll])
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -86,6 +87,7 @@ export default function HealthPage() {
       if (issueFilter) params.set('issue', issueFilter)
       if (statusFilter) params.set('status', statusFilter)
       if (searchDebounced) params.set('search', searchDebounced)
+      if (includeAll) params.set('includeAll', 'true')
       params.set('page', String(page))
       params.set('limit', '50')
 
@@ -97,7 +99,7 @@ export default function HealthPage() {
     } finally {
       setLoading(false)
     }
-  }, [issueFilter, statusFilter, searchDebounced, page])
+  }, [issueFilter, statusFilter, searchDebounced, page, includeAll])
 
   useEffect(() => {
     fetchHealth()
@@ -119,7 +121,7 @@ export default function HealthPage() {
     )
   }
 
-  const { designs, total, pages, summary, issueLabels, totalWithIssues, totalHealthy } = data
+  const { designs, total, pages, summary, issueLabels, totalWithIssues, totalHealthy, totalExcluded } = data
 
   return (
     <div className="container">
@@ -153,6 +155,38 @@ export default function HealthPage() {
             <div className="stat-label">Totaal</div>
           </div>
         </div>
+        {totalExcluded > 0 && (
+          <div style={{
+            marginTop: 12,
+            padding: '8px 14px',
+            background: '#f9fafb',
+            borderRadius: 6,
+            fontSize: 13,
+            color: '#6b7280',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>
+              {totalExcluded} legacy design{totalExcluded !== 1 ? 's' : ''} verborgen (LIVE zonder pipeline-data)
+            </span>
+            <button
+              onClick={() => setIncludeAll(!includeAll)}
+              style={{
+                background: 'none',
+                border: '1px solid #d1d5db',
+                borderRadius: 4,
+                padding: '3px 10px',
+                fontSize: 12,
+                color: includeAll ? '#dc2626' : '#6b7280',
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              {includeAll ? 'Verberg legacy' : 'Toon alles'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Issue category breakdown */}
