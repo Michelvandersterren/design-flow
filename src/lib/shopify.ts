@@ -704,25 +704,24 @@ export async function createShopifyProduct(designId: string) {
 }
 
 /**
- * Update an existing Shopify product's content fields and metafields.
- * Used when content is regenerated or edited after the product was already published.
+ * Full sync of an existing Shopify product from the design-flow database.
  *
- * Updates:
- *  - body_html (short description)
- *  - metafields: product_type, material, induction_compatible,
- *                product_information, marketplace_description (from longDescription),
- *                google_description, global.title_tag, global.description_tag,
- *                mm-google-shopping.condition/gender/age_group
+ * Updates everything: title, body_html, tags, product_type, template_suffix,
+ * variant prices/compare_at/barcodes, product category, all metafields,
+ * and re-uploads all mockup images in the correct order.
  */
 export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
+  // Re-use buildShopifyProduct to get the canonical payload + image list
+  const { product: payload, images } = await buildShopifyProduct(designId)
+
+  // Load design for extra fields not in payload
   const design = await prisma.design.findUnique({
     where: { id: designId },
     include: {
       content: true,
-      variants: { orderBy: [{ productType: 'asc' }, { size: 'asc' }], take: 1 },
+      variants: true,
     },
   })
-
   if (!design) throw new Error(`Design not found: ${designId}`)
 
   const nlContent = design.content.find((c) => c.language === 'nl')
@@ -730,50 +729,86 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
 
   const firstType = design.variants[0]?.productType
 
-  // Build color_plain from colorTags
-  const parseField = (value: string | null): string[] => {
-    if (!value) return []
-    try {
-      const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
-    } catch {}
-    return value.split(',').map((s) => s.trim()).filter(Boolean)
-  }
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-  const colorPlain = parseField(design.colorTags).map(capitalize).join(', ') || 'Multicolor'
-
-  // Convert plain-text description to HTML paragraphs for Shopify
-  const toBodyHtml = (text: string | null): string => {
-    if (!text) return ''
-    return text
-      .split(/\n{2,}/)
-      .map((para) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
-      .join('\n')
-  }
-
-  // Convert plain text to Shopify rich_text_field JSON format
-  const toRichText = (text: string | null): string => {
-    if (!text) return ''
-    const paragraphs = text.split(/\n{2,}/).filter(Boolean)
-    const children = paragraphs.map((para) => ({
-      type: 'paragraph',
-      children: [{ type: 'text', value: para }],
-    }))
-    return JSON.stringify({ type: 'root', children })
-  }
-
-  // 1. Update body_html on the product itself
+  // ---------------------------------------------------------------------------
+  // 1. Update core product fields (title, body_html, tags, product_type, template)
+  // ---------------------------------------------------------------------------
+  console.log(`[Shopify Update] Syncing product fields for ${shopifyProductId}`)
   await shopifyFetch(`/products/${shopifyProductId}.json`, {
     method: 'PUT',
     body: JSON.stringify({
       product: {
         id: shopifyProductId,
-        body_html: toBodyHtml(nlContent.longDescription ?? nlContent.description),
+        title: payload.title,
+        body_html: payload.body_html,
+        product_type: payload.product_type,
+        tags: payload.tags,
+        vendor: payload.vendor,
+        ...(payload.template_suffix ? { template_suffix: payload.template_suffix } : {}),
       },
     }),
   })
 
-  // 2. Fetch existing metafields so we can PUT (update) instead of POST (create)
+  // ---------------------------------------------------------------------------
+  // 2. Update product category via GraphQL
+  // ---------------------------------------------------------------------------
+  const categoryId = firstType ? PRODUCT_CATEGORY_ID[firstType] : undefined
+  if (categoryId) {
+    const productGid = `gid://shopify/Product/${shopifyProductId}`
+    console.log(`[Shopify Update] Setting product category to ${categoryId}`)
+    try {
+      await shopifyGraphQL(
+        `mutation productUpdate($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product { id productCategory { productTaxonomyNode { id name } } }
+            userErrors { field message }
+          }
+        }`,
+        { input: { id: productGid, productCategory: { productTaxonomyNodeId: categoryId } } }
+      )
+    } catch (err) {
+      console.error(`[Shopify Update] Failed to set product category (non-fatal):`, err)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. Update existing variants (price, compare_at_price, barcode, sku)
+  //    and track which local variants don't exist on Shopify yet.
+  // ---------------------------------------------------------------------------
+  console.log(`[Shopify Update] Syncing variants`)
+  const shopifyProductData = await shopifyFetch(`/products/${shopifyProductId}.json`)
+  const existingShopifyVariants: Array<{ id: number; sku: string }> =
+    shopifyProductData.product?.variants ?? []
+
+  // Map existing Shopify variants by SKU for fast lookup
+  const shopifyVariantBySku = new Map(existingShopifyVariants.map((v) => [v.sku, v]))
+
+  for (const localVariant of payload.variants) {
+    const existing = shopifyVariantBySku.get(localVariant.sku)
+    if (existing) {
+      // Update existing variant
+      await shopifyFetch(`/variants/${existing.id}.json`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          variant: {
+            id: existing.id,
+            price: localVariant.price,
+            compare_at_price: localVariant.compare_at_price ?? null,
+            barcode: localVariant.barcode ?? null,
+            weight: localVariant.weight,
+            weight_unit: localVariant.weight_unit,
+          },
+        }),
+      })
+    }
+    // Note: creating new variants via REST requires option values to already exist.
+    // For now we only update existing variants. New variant creation requires a
+    // full republish (delete + create) or GraphQL productVariantsBulkCreate.
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Upsert all product-level metafields
+  // ---------------------------------------------------------------------------
+  console.log(`[Shopify Update] Syncing metafields`)
   const metafieldsData = await shopifyFetch(`/products/${shopifyProductId}/metafields.json`)
   const existingMetafields: { id: number; namespace: string; key: string }[] =
     metafieldsData.metafields ?? []
@@ -781,7 +816,6 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   const findMetafieldId = (namespace: string, key: string): number | undefined =>
     existingMetafields.find((m) => m.namespace === namespace && m.key === key)?.id
 
-  // Helper: upsert a single metafield
   const upsertMetafield = async (
     namespace: string,
     key: string,
@@ -802,50 +836,127 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
     }
   }
 
-  // 3. Upsert static product metafields
-  await upsertMetafield('custom', 'manufacturer',          'probo',                                           'single_line_text_field')
-  await upsertMetafield('custom', 'modelnaam',             design.designName,                                 'single_line_text_field')
-  await upsertMetafield('custom', 'color_plain',           colorPlain,                                        'single_line_text_field')
-  await upsertMetafield('custom', 'induction_compatible',  String(design.inductionFriendly ?? false),         'single_line_text_field')
-  if (firstType) {
-    await upsertMetafield('custom', 'product_type', firstType, 'single_line_text_field')
-    if (PRODUCT_MATERIAL[firstType]) {
-      await upsertMetafield('custom', 'material',       PRODUCT_MATERIAL[firstType], 'single_line_text_field')
-    }
-    if (MATERIAL_PLAIN[firstType]) {
-      await upsertMetafield('custom', 'material_plain', MATERIAL_PLAIN[firstType],   'single_line_text_field')
-    }
+  // Upsert each metafield from the build payload
+  for (const mf of payload.metafields) {
+    await upsertMetafield(mf.namespace, mf.key, mf.value, mf.type)
   }
 
-  // 4. Upsert all content metafields
-  if (nlContent.description) {
-    await upsertMetafield('custom', 'product_information',     toRichText(nlContent.description),              'rich_text_field')
+  // ---------------------------------------------------------------------------
+  // 5. Re-upload all images: delete existing, then upload fresh in correct order
+  // ---------------------------------------------------------------------------
+  console.log(`[Shopify Update] Re-uploading ${images.length} images`)
+
+  // 5a. Delete all existing images
+  const existingImagesData = await shopifyFetch(`/products/${shopifyProductId}/images.json`)
+  const existingImages: Array<{ id: number }> = existingImagesData.images ?? []
+
+  for (const img of existingImages) {
+    try {
+      await shopifyFetch(`/products/${shopifyProductId}/images/${img.id}.json`, {
+        method: 'DELETE',
+      })
+    } catch (err) {
+      console.error(`[Shopify Update] Failed to delete image ${img.id}:`, err)
+    }
   }
-  if (nlContent.longDescription) {
-    await upsertMetafield('custom', 'marketplace_description', toBodyHtml(nlContent.longDescription),          'multi_line_text_field')
-    await upsertMetafield('custom', 'long_description',        toRichText(nlContent.longDescription),          'rich_text_field')
+  console.log(`[Shopify Update] Deleted ${existingImages.length} existing images`)
+
+  // 5b. Upload new images sequentially (same logic as createShopifyProduct)
+  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string }
+  const uploadedImages: UploadedImage[] = []
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i]
+    console.log(`[Shopify Update] Uploading image ${i + 1}/${images.length}: ${img.alt ?? 'no alt'} (sizeKey: ${img.sizeKey ?? 'none'})`)
+    try {
+      const res = await shopifyFetch(`/products/${shopifyProductId}/images.json`, {
+        method: 'POST',
+        body: JSON.stringify({ image: { src: img.src, alt: img.alt } }),
+        timeoutMs: 90000,
+      })
+      if (res?.image) {
+        uploadedImages.push({
+          shopifyImageId: res.image.id,
+          shopifyMediaId: res.image.admin_graphql_api_id,
+          position: res.image.position,
+          sizeKey: img.sizeKey,
+        })
+        console.log(`[Shopify Update] Image ${i + 1} uploaded OK — position ${res.image.position}`)
+      } else {
+        console.error(`[Shopify Update] Image ${i + 1} — unexpected response:`, JSON.stringify(res).slice(0, 500))
+      }
+    } catch (err) {
+      console.error(`[Shopify Update] Image ${i + 1} upload FAILED (${img.alt ?? 'unknown'}):`, err)
+    }
+    if (i < images.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
   }
-  if (nlContent.googleShoppingDescription) {
-    await upsertMetafield('custom', 'google_description',      nlContent.googleShoppingDescription,            'multi_line_text_field')
-  }
-  // Google Shopping feed fields (product-level)
-  await upsertMetafield('mm-google-shopping', 'custom_product', 'true',                                        'boolean')
-  await upsertMetafield('mm-google-shopping', 'condition',     'new',                                          'single_line_text_field')
-  await upsertMetafield('mm-google-shopping', 'gender',        'unisex',                                       'single_line_text_field')
-  await upsertMetafield('mm-google-shopping', 'age_group',     'adult',                                        'single_line_text_field')
-  // Google product category (MC=Home Decor, SP=Kitchen Backsplash; IB has none)
-  if (firstType === 'MC') {
-    await upsertMetafield('mm-google-shopping', 'google_product_category', '500044',                           'single_line_text_field')
-  } else if (firstType === 'SP') {
-    await upsertMetafield('mm-google-shopping', 'google_product_category', '2901',                             'single_line_text_field')
-  }
-  if (nlContent.seoTitle) {
-    await upsertMetafield('global', 'title_tag',              nlContent.seoTitle,                             'single_line_text_field')
-  }
-  if (nlContent.seoDescription) {
-    await upsertMetafield('global', 'description_tag',        nlContent.seoDescription,                       'single_line_text_field')
+  console.log(`[Shopify Update] Image upload complete: ${uploadedImages.length}/${images.length} succeeded`)
+
+  // 5c. Assign variant images (same logic as createShopifyProduct)
+  // Re-fetch the product to get current variant IDs
+  const updatedProductData = await shopifyFetch(`/products/${shopifyProductId}.json`)
+  const updatedVariants: Array<{ id: number; sku: string }> = updatedProductData.product?.variants ?? []
+
+  const sizedImages = uploadedImages.filter((img) => img.sizeKey)
+  if (sizedImages.length > 0 && updatedVariants.length > 0) {
+    const variantsByMockupSizeKey = new Map<string, number[]>()
+
+    for (const sv of updatedVariants) {
+      if (!sv.sku) continue
+      let mockupSizeKey: string | undefined
+
+      if (firstType === 'IB') {
+        const parts = sv.sku.split('-')
+        if (parts.length >= 4) {
+          const variantSizeKey = `${parts[parts.length - 2]}x${parts[parts.length - 1]}`
+          mockupSizeKey = IB_SIZE_KEY_ALIASES[variantSizeKey] ?? variantSizeKey
+        }
+      } else if (firstType === 'MC') {
+        const parts = sv.sku.split('-')
+        if (parts.length >= 4) {
+          mockupSizeKey = parts[2]
+        }
+      } else if (firstType === 'SP') {
+        const parts = sv.sku.split('-')
+        if (parts.length >= 5) {
+          mockupSizeKey = `${parts[parts.length - 3]}x${parts[parts.length - 2]}`
+        }
+      }
+
+      if (mockupSizeKey) {
+        const existing = variantsByMockupSizeKey.get(mockupSizeKey) ?? []
+        existing.push(sv.id)
+        variantsByMockupSizeKey.set(mockupSizeKey, existing)
+      }
+    }
+
+    await Promise.all(
+      sizedImages
+        .filter((img) => {
+          const variantIds = variantsByMockupSizeKey.get(img.sizeKey!)
+          return variantIds && variantIds.length > 0
+        })
+        .map((img) => {
+          const variantIds = variantsByMockupSizeKey.get(img.sizeKey!)!
+          return shopifyFetch(`/products/${shopifyProductId}/images/${img.shopifyImageId}.json`, {
+            method: 'PUT',
+            body: JSON.stringify({ image: { id: img.shopifyImageId, variant_ids: variantIds } }),
+          }).catch((err) => {
+            console.error(`[Shopify Update] Variant image assignment failed for sizeKey ${img.sizeKey}:`, err)
+          })
+        })
+    )
   }
 
+  // 5d. Set beschrijving_afbeelding metafield to image at position 2
+  const pos2Image = uploadedImages.find((img) => img.position === 2)
+  if (pos2Image) {
+    await upsertMetafield('custom', 'beschrijving_afbeelding', pos2Image.shopifyMediaId, 'file_reference')
+  }
+
+  console.log(`[Shopify Update] Full sync complete for product ${shopifyProductId}`)
   return { shopifyProductId, updated: true }
 }
 

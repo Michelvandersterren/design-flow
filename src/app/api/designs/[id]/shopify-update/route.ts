@@ -3,9 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { updateShopifyProduct, isShopifyConfigured } from '@/lib/shopify'
 import { pushTranslationsToShopify } from '@/lib/shopify-translations'
 
+export const maxDuration = 180 // 3 minutes — full sync re-uploads all mockup images
+
 /**
  * POST /api/designs/[id]/shopify-update
- * Push updated content (body_html + all metafields) to an already-published Shopify product.
+ * Full sync of an already-published Shopify product: title, body_html, tags,
+ * product category, variant prices, all metafields, and all images.
  *
  * Requires the design to already have a shopifyProductId on at least one variant.
  */
