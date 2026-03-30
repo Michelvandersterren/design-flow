@@ -603,7 +603,10 @@ export default function DesignDetail() {
 
   const shopifyVariantId = design.variants.find((v) => v.shopifyProductId)?.shopifyProductId
   const alreadyOnShopify = !!shopifyVariantId
-  const canPublish = !!(shopifyConfigured && nlContent && design.variants.length > 0 && !alreadyOnShopify && design.status !== 'LIVE')
+  const allVariantsHaveEan = design.variants.length > 0 && design.variants.every((v) => v.ean)
+  const hasMockups = (design.mockups ?? []).length > 0
+  const isApproved = design.status === 'APPROVED'
+  const canPublish = !!(shopifyConfigured && nlContent && design.variants.length > 0 && !alreadyOnShopify && design.status !== 'LIVE' && isApproved && hasMockups && allVariantsHaveEan)
 
   const savedMockups = design.mockups ?? []
   const displayMockups: (DesignMockup & { isNew?: boolean } | MockupGenerateResult & { isNew?: boolean })[] =
@@ -1001,6 +1004,15 @@ export default function DesignDetail() {
                       </button>
                     )}
                   </ActionRow>
+                  {!alreadyOnShopify && !canPublish && !publishing && (
+                    <div style={{ fontSize: 11, color: '#92400e', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', marginTop: -8 }}>
+                      {!isApproved && <div>Status moet APPROVED zijn (nu: {design.status})</div>}
+                      {!nlContent && <div>Nederlandse content ontbreekt</div>}
+                      {!hasMockups && <div>Mockups ontbreken</div>}
+                      {!allVariantsHaveEan && <div>Niet alle varianten hebben een EAN</div>}
+                      {design.variants.length === 0 && <div>Geen varianten aangemaakt</div>}
+                    </div>
+                  )}
                   {updateShopifyResult && (
                     <div style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, marginTop: -8,
                       background: updateShopifyResult.error ? '#fef2f2' : '#f0fdf4',

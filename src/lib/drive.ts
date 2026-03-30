@@ -86,7 +86,10 @@ export async function uploadDesignToDrive(
  */
 export function getDriveDirectUrl(fileId: string, absolute = false): string {
   if (absolute) {
-    return `https://drive.usercontent.google.com/download?id=${fileId}&export=view`
+    // Use lh3.googleusercontent.com for reliable CDN-backed image serving.
+    // This format avoids virus-scan interstitials and rate-limiting that
+    // plague drive.usercontent.google.com/download URLs.
+    return `https://lh3.googleusercontent.com/d/${fileId}=s0`
   }
   return `/api/drive-image/${fileId}`
 }

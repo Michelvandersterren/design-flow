@@ -24,6 +24,16 @@ const PRODUCT_TYPE_CUSTOM_LABEL: Record<string, string> = {
   SP: 'Spatscherm',
 }
 
+// Shopify product taxonomy node IDs per product type
+// IB: Cooktop Protectors (Home & Garden > Kitchen & Dining > ...)
+// MC: Visual Artwork (Home & Garden > Decor > Artwork > ...)
+// SP: Wall Paneling (closest match — decorative kitchen panel)
+const PRODUCT_CATEGORY_ID: Record<string, string> = {
+  IB: 'gid://shopify/ProductTaxonomyNode/10641',
+  MC: 'gid://shopify/ProductTaxonomyNode/10370',
+  SP: 'gid://shopify/ProductTaxonomyNode/10370', // Visual Artwork, same as MC for now
+}
+
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || ''
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04'
@@ -55,6 +65,37 @@ async function shopifyFetch(path: string, options: RequestInit & { timeoutMs?: n
   }
 
   return response.json()
+}
+
+/**
+ * Execute a Shopify GraphQL Admin API mutation/query.
+ */
+async function shopifyGraphQL(query: string, variables: Record<string, unknown> = {}) {
+  if (!SHOPIFY_ACCESS_TOKEN) {
+    throw new Error('SHOPIFY_ACCESS_TOKEN is not configured')
+  }
+
+  const url = `https://${SHOPIFY_STORE_URL}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`
+  const response = await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(30000),
+    headers: {
+      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Shopify GraphQL error ${response.status}: ${body}`)
+  }
+
+  const json = await response.json()
+  if (json.errors) {
+    throw new Error(`Shopify GraphQL error: ${JSON.stringify(json.errors)}`)
+  }
+  return json
 }
 
 /**
@@ -362,7 +403,7 @@ export async function buildShopifyProduct(designId: string) {
   return {
     product: {
       title: productTitle,
-      body_html: toBodyHtml(nlContent.description),
+      body_html: toBodyHtml(nlContent.longDescription ?? nlContent.description),
       vendor: 'KitchenArt',
       product_type: productTypeLabel,
       tags: tags.join(', '),
@@ -457,37 +498,38 @@ export async function createShopifyProduct(designId: string) {
   const uploadedImages: UploadedImage[] = []
 
   if (images.length > 0) {
-    const BATCH_SIZE = 3
-    for (let i = 0; i < images.length; i += BATCH_SIZE) {
-      const batch = images.slice(i, i + BATCH_SIZE)
-      const results = await Promise.all(
-        batch.map((img, batchIdx) =>
-          shopifyFetch(`/products/${shopifyProductId}/images.json`, {
-            method: 'POST',
-            body: JSON.stringify({ image: { src: img.src, alt: img.alt } }),
-            timeoutMs: 60000, // 60s per image — Shopify downloads from Google Drive
-          }).then((res) => ({
-            success: true as const,
-            data: res,
-            idx: i + batchIdx,
-            sizeKey: img.sizeKey,
-          })).catch((err) => {
-            console.error(`Image upload failed for ${img.alt ?? 'unknown'}:`, err)
-            return { success: false as const, idx: i + batchIdx, sizeKey: img.sizeKey }
-          })
-        )
-      )
-      for (const r of results) {
-        if (r.success && r.data?.image) {
+    console.log(`[Shopify] Uploading ${images.length} images for product ${shopifyProductId}`)
+    // Upload images sequentially (one at a time) with a small delay between
+    // uploads to avoid Shopify and Google Drive rate limits.
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i]
+      console.log(`[Shopify] Uploading image ${i + 1}/${images.length}: ${img.alt ?? 'no alt'} (sizeKey: ${img.sizeKey ?? 'none'})`)
+      try {
+        const res = await shopifyFetch(`/products/${shopifyProductId}/images.json`, {
+          method: 'POST',
+          body: JSON.stringify({ image: { src: img.src, alt: img.alt } }),
+          timeoutMs: 90000, // 90s per image — Shopify downloads from Google Drive
+        })
+        if (res?.image) {
           uploadedImages.push({
-            shopifyImageId: r.data.image.id,
-            shopifyMediaId: r.data.image.admin_graphql_api_id,
-            position: r.data.image.position,
-            sizeKey: r.sizeKey,
+            shopifyImageId: res.image.id,
+            shopifyMediaId: res.image.admin_graphql_api_id,
+            position: res.image.position,
+            sizeKey: img.sizeKey,
           })
+          console.log(`[Shopify] Image ${i + 1} uploaded OK — position ${res.image.position}`)
+        } else {
+          console.error(`[Shopify] Image ${i + 1} — unexpected response:`, JSON.stringify(res).slice(0, 500))
         }
+      } catch (err) {
+        console.error(`[Shopify] Image ${i + 1} upload FAILED (${img.alt ?? 'unknown'}):`, err)
+      }
+      // Small delay between uploads to prevent rate-limiting
+      if (i < images.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
       }
     }
+    console.log(`[Shopify] Image upload complete: ${uploadedImages.length}/${images.length} succeeded`)
   }
 
   // ---------------------------------------------------------------------------
@@ -618,6 +660,42 @@ export async function createShopifyProduct(designId: string) {
     },
   })
 
+  // ---------------------------------------------------------------------------
+  // Set product category via GraphQL (REST API doesn't support this).
+  // This maps to the Shopify product taxonomy for proper classification.
+  // ---------------------------------------------------------------------------
+  const categoryId = firstType ? PRODUCT_CATEGORY_ID[firstType] : undefined
+  if (categoryId) {
+    const productGid = `gid://shopify/Product/${shopifyProductId}`
+    console.log(`[Shopify] Setting product category to ${categoryId}`)
+    try {
+      await shopifyGraphQL(
+        `mutation productUpdate($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product { id productCategory { productTaxonomyNode { id name } } }
+            userErrors { field message }
+          }
+        }`,
+        { input: { id: productGid, productCategory: { productTaxonomyNodeId: categoryId } } }
+      )
+    } catch (err) {
+      console.error(`[Shopify] Failed to set product category (non-fatal):`, err)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Activate the product so it is published to all sales channels.
+  // The product was created as "draft" to prevent premature visibility while
+  // images were still uploading. Setting status to "active" publishes it to
+  // the online store and any other sales channels configured in Shopify.
+  // ---------------------------------------------------------------------------
+  console.log(`[Shopify] Activating product ${shopifyProductId}`)
+  await shopifyFetch(`/products/${shopifyProductId}.json`, {
+    method: 'PUT',
+    body: JSON.stringify({ product: { id: shopifyProductId, status: 'active', published: true } }),
+  })
+  console.log(`[Shopify] Product ${shopifyProductId} is now active`)
+
   return {
     shopifyProductId,
     shopifyProductHandle: shopifyProduct.handle,
@@ -690,7 +768,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
     body: JSON.stringify({
       product: {
         id: shopifyProductId,
-        body_html: toBodyHtml(nlContent.description),
+        body_html: toBodyHtml(nlContent.longDescription ?? nlContent.description),
       },
     }),
   })

@@ -30,6 +30,43 @@ export async function POST(
   }
 
   try {
+    // Guard: design must be APPROVED with mockups, content and EANs before publishing
+    const design = await prisma.design.findUnique({
+      where: { id: designId },
+      include: {
+        content: { where: { language: 'nl' }, take: 1 },
+        variants: true,
+        mockups: { take: 1 },
+      },
+    })
+
+    if (!design) {
+      return NextResponse.json({ error: 'Design niet gevonden' }, { status: 404 })
+    }
+    if (design.status !== 'APPROVED') {
+      return NextResponse.json(
+        { error: `Design moet status APPROVED hebben om te publiceren (huidige status: ${design.status})` },
+        { status: 400 }
+      )
+    }
+    if (design.content.length === 0) {
+      return NextResponse.json({ error: 'Nederlandse content ontbreekt' }, { status: 400 })
+    }
+    if (design.variants.length === 0) {
+      return NextResponse.json({ error: 'Geen varianten aangemaakt' }, { status: 400 })
+    }
+    if (design.mockups.length === 0) {
+      return NextResponse.json({ error: 'Mockups ontbreken' }, { status: 400 })
+    }
+    const missingEan = design.variants.some((v) => !v.ean)
+    if (missingEan) {
+      return NextResponse.json({ error: 'Niet alle varianten hebben een EAN' }, { status: 400 })
+    }
+    const alreadyPublished = design.variants.some((v) => v.shopifyProductId)
+    if (alreadyPublished) {
+      return NextResponse.json({ error: 'Design is al gepubliceerd naar Shopify' }, { status: 400 })
+    }
+
     const result = await createShopifyProduct(designId)
 
     // Run translations and DB+Notion updates in parallel.
@@ -50,26 +87,26 @@ export async function POST(
 
     const dbAndNotionPromise = (async () => {
       // Set design status to LIVE in DB
-      const design = await prisma.design.update({
+      const updatedDesign = await prisma.design.update({
         where: { id: designId },
         data: { status: 'LIVE' },
       })
       // Write back to Notion if notionId is available
-      if (design.notionId) {
+      if (updatedDesign.notionId) {
         try {
-          await markDesignLiveInNotion(design.notionId, result.shopifyProductHandle)
+          await markDesignLiveInNotion(updatedDesign.notionId, result.shopifyProductHandle)
         } catch (notionError) {
           console.error('Notion write-back failed (non-fatal):', notionError)
         }
       }
-      return design
+      return updatedDesign
     })()
 
-    const [, design] = await Promise.all([translationPromise, dbAndNotionPromise])
+    const [, updatedDesign] = await Promise.all([translationPromise, dbAndNotionPromise])
 
     return NextResponse.json({
       success: true,
-      notionUpdated: !!design.notionId,
+      notionUpdated: !!updatedDesign.notionId,
       ...result,
     })
   } catch (error) {
