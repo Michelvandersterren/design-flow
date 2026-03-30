@@ -21,10 +21,26 @@ npm run db:generate      # Regenerate Prisma client after schema changes
 npm run db:studio        # Open Prisma Studio GUI
 ```
 
-There are **no automated tests** in this project. Verify changes by:
+### Testing
+
+```bash
+npm test                 # Unit tests (vitest run, excludes integration)
+npm run test:integration # Integration tests (temp SQLite DB, separate config)
+npm run test:all         # Both unit + integration tests
+```
+
+- **Unit tests** (91 tests, 3 files): `constants.test.ts`, `variants.test.ts`, `quality.test.ts`
+- **Integration tests** (23 tests, 2 files): `ean.integration.test.ts`, `variants.integration.test.ts`
+- Integration tests use a temp SQLite DB (`src/test/setup-db.ts`) — patches the global Prisma singleton, runs `prisma db push`, cleans up after tests
+- Test config: `vitest.config.ts` (unit), `vitest.integration.config.ts` (integration)
+- GS1 registration is mocked in integration tests (env vars absent → silently skipped)
+
+### Verification before committing
+
 1. `npx tsc --noEmit` — must produce 0 errors
 2. `npm run lint` — must produce 0 errors
-3. Manual test via `npm run dev` in the browser
+3. `npm test` — all unit tests must pass
+4. Manual test via `npm run dev` in the browser for UI changes
 
 ```bash
 kill $(lsof -t -i:3000)  # Kill stuck dev server
@@ -40,32 +56,57 @@ src/
 ├── app/
 │   ├── api/                    # Next.js Route Handlers (server-only)
 │   │   ├── ai/generate/        # POST — Claude vision content generation
-│   │   ├── designs/[id]/       # GET/PATCH/DELETE + sub-routes per action
+│   │   ├── designs/
+│   │   │   ├── [id]/           # GET/PATCH/DELETE + sub-routes per action
+│   │   │   ├── approve/        # POST — bulk approve
+│   │   │   ├── bulk-status/    # POST — batch status transitions
+│   │   │   └── upload/         # POST — upload new design
 │   │   ├── ean/                # EAN assign + GS1 sync
+│   │   ├── health/             # GET — health check (12 issue types)
 │   │   ├── notion/             # Notion sync
+│   │   ├── regenerate/         # GET preview + POST execute bulk regeneration
+│   │   ├── review/             # GET — content quality review
 │   │   ├── shopify/            # Shopify helpers
-│   │   └── workflow/bulk*/     # NL→DE→EN pipeline + bulk publish
-│   ├── designs/[id]/page.tsx   # Design detail page (large client component)
+│   │   └── workflow/bulk*/     # NL→DE→EN→FR pipeline + bulk publish
 │   ├── brand-voice/            # Brand voice UI
+│   ├── designs/[id]/page.tsx   # Design detail page (uses tab components)
+│   ├── health/                 # Health Check dashboard
+│   ├── regenerate/             # Bulk Content Regeneration UI
+│   ├── review/                 # Content Review dashboard
+│   ├── style-families/         # Style families UI
 │   ├── upload/                 # Upload new design UI
-│   └── page.tsx                # Dashboard
-└── lib/
-    ├── ai.ts                   # Claude Sonnet — content generation
-    ├── constants.ts            # Collections, sizes, pricing, SKU prefixes
-    ├── drive.ts                # Google Drive — upload, list, proxy
-    ├── ean.ts                  # EAN-13 generation and validation
-    ├── env.ts                  # Environment variable helpers
-    ├── gs1.ts                  # GS1 NL OAuth2 + GTIN registration
-    ├── mockup-config.ts        # 44 PSD templates mapped (IB/SP/MC)
-    ├── mockup.ts               # Mockup generation + Drive upload
-    ├── notion.ts               # Notion read/write
-    ├── print-config.ts         # Print template config (IB/SP/MC)
-    ├── print.ts                # PDF generation via pdf-lib
-    ├── prisma.ts               # Prisma client singleton
-    ├── shopify.ts              # Shopify Admin REST API
-    ├── shopify-translations.ts # Shopify Translations GraphQL API
-    ├── translation.ts          # NL→DE/EN via Claude or DeepL
-    └── variants.ts             # SKU/EAN variant generation
+│   └── page.tsx                # Dashboard (paginated, filtered)
+├── components/
+│   ├── Sidebar.tsx             # Global sidebar navigation
+│   └── design-detail/          # Refactored detail page components
+│       ├── types.ts            # Shared interfaces
+│       ├── shared.tsx          # Lightbox, WorkflowProgress, reusable UI
+│       ├── OverviewTab.tsx     # Actions, preview, publish, verify
+│       ├── MockupsTab.tsx      # Mockup generation and display
+│       ├── PrintFilesTab.tsx   # Print file generation and display
+│       ├── ContentTab.tsx      # Content editing, translations
+│       ├── VariantsTab.tsx     # Variants table with metafields
+│       └── EditModal.tsx       # Design edit form modal
+├── lib/
+│   ├── ai.ts                   # Claude Sonnet — content generation
+│   ├── constants.ts            # Collections, sizes, pricing, SKU prefixes
+│   ├── drive.ts                # Google Drive — upload, list, proxy
+│   ├── ean.ts                  # EAN-13 generation and validation
+│   ├── env.ts                  # Environment variable helpers
+│   ├── gs1.ts                  # GS1 NL OAuth2 + GTIN registration
+│   ├── mockup-config.ts        # 44 PSD templates mapped (IB/SP/MC)
+│   ├── mockup.ts               # Mockup generation + Drive upload
+│   ├── notion.ts               # Notion read/write
+│   ├── print-config.ts         # Print template config (IB/SP/MC)
+│   ├── print.ts                # PDF generation via pdf-lib
+│   ├── prisma.ts               # Prisma client singleton
+│   ├── quality.ts              # Content quality checking (FORBIDDEN_WORDS, scoring)
+│   ├── shopify.ts              # Shopify Admin REST API
+│   ├── shopify-translations.ts # Shopify Translations GraphQL API
+│   ├── translation.ts          # NL→DE/EN/FR via Claude or DeepL
+│   └── variants.ts             # SKU/EAN variant generation
+└── test/
+    └── setup-db.ts             # Integration test setup (temp SQLite DB)
 ```
 
 ---
@@ -76,6 +117,7 @@ src/
 - **Strict mode** is on (`"strict": true` in tsconfig). No `any` types unless absolutely unavoidable.
 - Use explicit return types on exported functions.
 - Use union types for constrained string values: `'IB' | 'SP' | 'MC'`, `'nl' | 'de' | 'en' | 'fr'`.
+- Test files use the `*.test.ts` naming convention; integration tests use `*.integration.test.ts`.
 - Use `interface` for object shapes, `type` for unions and aliases.
 - Cast narrow types where needed: `productType as 'IB' | 'SP' | 'MC'`.
 - `npx tsc --noEmit` must pass with 0 errors before any commit.
@@ -129,7 +171,7 @@ src/
 - **Shopify Translations API**: use GraphQL `translationsRegister`, not the deprecated REST `/translations` endpoint. All translation errors are non-fatal.
 - **EAN generation**: GS1 prefix `8721476` — generation is purely local (DB max + 1); `registerGtin()` is fire-and-forget.
 - **SP product type**: when checking `splashFriendly / circleFriendly / inductionFriendly`, check `splashFriendly` first to avoid assigning wrong AI product type.
-- **Language**: all comments, variable names, and commit messages are in English. UI text and content generation is in Dutch (NL primary, DE/EN secondary).
+- **Language**: all comments, variable names, and commit messages are in English. UI text and content generation is in Dutch (NL primary, DE/EN/FR secondary).
 
 ---
 

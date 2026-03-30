@@ -35,34 +35,59 @@ design-flow/
 │   │   │   │   ├── [id]/fork/        # POST — create copy for different productType
 │   │   │   │   ├── [id]/mockup/      # POST generate, GET status
 │   │   │   │   ├── [id]/publish/     # POST/GET — Shopify publish
-│   │   │   │   ├── [id]/translate/   # POST — NL → DE/EN
+│   │   │   │   ├── [id]/translate/   # POST — NL → DE/EN/FR
 │   │   │   │   ├── [id]/variants/    # POST — generate variants
+│   │   │   │   ├── [id]/verify/      # POST — post-publish Shopify verification
 │   │   │   │   ├── analyze-image/    # POST — Claude vision on Drive image
 │   │   │   │   ├── approve/          # POST — bulk approve
+│   │   │   │   ├── bulk-status/      # POST — batch status transitions
 │   │   │   │   └── upload/           # POST — upload new design
+│   │   │   ├── health/               # GET — health check (12 issue types)
 │   │   │   ├── notion/               # Notion sync
+│   │   │   ├── regenerate/           # GET preview + POST execute
+│   │   │   ├── review/               # GET — content quality review
 │   │   │   ├── shopify/              # Shopify helpers
 │   │   │   └── workflow/
-│   │   │       ├── bulk/             # NL → DE → EN → variants pipeline
+│   │   │       ├── bulk/             # NL → DE → EN → FR → variants pipeline
 │   │   │       └── bulk-publish/     # Bulk Shopify publish (APPROVED only)
 │   │   ├── brand-voice/              # Brand voice UI
+│   │   ├── health/                   # Health Check dashboard
+│   │   ├── regenerate/               # Bulk Content Regeneration UI
+│   │   ├── review/                   # Content Review dashboard
 │   │   ├── upload/                   # Upload new design UI
-│   │   ├── page.tsx                  # Dashboard
-│   │   └── designs/[id]/page.tsx     # Design detail page
+│   │   ├── page.tsx                  # Dashboard (paginated, filtered)
+│   │   └── designs/[id]/page.tsx     # Design detail page (696 lines, uses tab components)
 │   ├── components/
-│   │   └── Sidebar.tsx        # Global sidebar navigation
-│   └── lib/
-│       ├── ai.ts             # Claude Sonnet — content generation
-│       ├── constants.ts      # Collections, sizes, pricing
-│       ├── drive.ts          # Google Drive — upload, list, base64 (resized via sharp)
-│       ├── env.ts            # Environment variable helpers
-│       ├── mockup-config.ts  # 44 PSD templates mapped (IB/SP/MC)
-│       ├── mockup.ts         # Mockup generation + altText helper
-│       ├── notion.ts         # Notion read/write
-│       ├── prisma.ts         # Prisma client
-│       ├── shopify.ts        # Shopify Admin API
-│       ├── translation.ts    # NL → DE/EN via Claude
-│       └── variants.ts       # Variant generation (IB/MC/SP sizes + pricing)
+│   │   ├── Sidebar.tsx               # Global sidebar navigation
+│   │   └── design-detail/            # Refactored detail page components
+│   │       ├── types.ts              # Shared interfaces
+│   │       ├── shared.tsx            # Lightbox, WorkflowProgress, reusable UI
+│   │       ├── OverviewTab.tsx       # Actions, preview, publish, verify
+│   │       ├── MockupsTab.tsx        # Mockup generation and display
+│   │       ├── PrintFilesTab.tsx     # Print file generation and display
+│   │       ├── ContentTab.tsx        # Content editing, translations
+│   │       ├── VariantsTab.tsx       # Variants table with metafields
+│   │       └── EditModal.tsx         # Design edit form modal
+│   ├── lib/
+│   │   ├── ai.ts             # Claude Sonnet — content generation
+│   │   ├── constants.ts      # Collections, sizes, pricing
+│   │   ├── drive.ts          # Google Drive — upload, list, base64 (resized via sharp)
+│   │   ├── ean.ts            # EAN-13 generation and validation
+│   │   ├── env.ts            # Environment variable helpers
+│   │   ├── gs1.ts            # GS1 NL OAuth2 + GTIN registration
+│   │   ├── mockup-config.ts  # 44 PSD templates mapped (IB/SP/MC)
+│   │   ├── mockup.ts         # Mockup generation + altText helper
+│   │   ├── notion.ts         # Notion read/write
+│   │   ├── prisma.ts         # Prisma client
+│   │   ├── quality.ts        # Content quality checking (FORBIDDEN_WORDS, scoring)
+│   │   ├── shopify.ts        # Shopify Admin API
+│   │   ├── shopify-translations.ts # Shopify Translations GraphQL API
+│   │   ├── translation.ts    # NL → DE/EN/FR via Claude
+│   │   └── variants.ts       # Variant generation (IB/MC/SP sizes + pricing)
+│   └── test/
+│       └── setup-db.ts       # Integration test setup (temp SQLite DB)
+├── vitest.config.ts              # Unit test config
+├── vitest.integration.config.ts  # Integration test config (separate DB)
 ├── public/
 ├── .env                      # Environment variables (never commit)
 └── package.json
@@ -201,7 +226,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 
 - ✅ Full Notion sync (291 designs)
 - ✅ AI content generation with Claude vision
-- ✅ Multi-language: NL/DE/EN translation (description + longDescription)
+- ✅ Multi-language: NL/DE/EN/FR translation (description + longDescription)
 - ✅ Variant generation with EAN-13
 - ✅ Shopify publish (single + bulk for APPROVED)
 - ✅ Mockup pipeline via Photoshop JSX (44 templates, all working)
@@ -210,7 +235,7 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ Design fork — copy design for different product type (IB/SP/MC)
 - ✅ Mockup section split: generic mockups + size-specific per variant
 - ✅ Alt-text auto-generation per mockup (`buildMockupAltText()`)
-- ✅ Content inline editing — NL/DE/EN cards editable in place
+- ✅ Content inline editing — NL/DE/EN/FR cards editable in place
 - ✅ Image resize via sharp (fixes Claude 5MB base64 limit)
 - ✅ Design detail page redesign: tabs, sticky header, workflow progress, lightbox
 - ✅ Print PDFs via pdf-lib with CutContour spot color + 10mm bleed
@@ -221,6 +246,14 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ Global navigation sidebar (Sidebar.tsx) — fixed sidebar met links naar alle pagina's
 - ✅ Delete designs — DRAFT/REVIEW designs verwijderen vanuit dashboard en detail pagina
 - ✅ AI prompt hardening — "HARDE SCHRIJFREGELS" tegen em-dashes en AI-typische patronen
+- ✅ Server-side pagination, sorting en filtering op dashboard
+- ✅ Health Check dashboard — 12 issue types, klikbare filters
+- ✅ Content Review dashboard — split-panel UI met quality scoring
+- ✅ Post-Publish Verification — Shopify product vergelijking
+- ✅ Bulk Content Regeneration — selectieve heropbouw na brand voice wijzigingen
+- ✅ Automated tests — 114 tests (91 unit + 23 integration) via Vitest
+- ✅ Bulk status endpoint — batch status transitions in single DB call
+- ✅ Detail page refactor — 1862→696 regels, 8 component bestanden
 
 ## Known Issues / Backlog
 
@@ -1206,3 +1239,112 @@ Vergelijking van app-gepubliceerde NLSNVG producten (IB + SP) met handmatig aang
 
 - IB product `10300254880086`: category gezet naar Cooktop Protectors
 - SP product `10300257239382`: category gezet + titel gecorrigeerd van "Nile Sunset Voyage (IB) Spatscherm" naar "Nile Sunset Voyage Spatscherm"
+
+---
+
+## Session — 2026-03-30 (vervolg): 8 fasen infrastructure improvements + testing
+
+### Fase 1.1: Dashboard pagination + advanced search
+
+**`src/app/api/designs/route.ts`** (80→150 lines):
+- Server-side pagination met `skip`/`take` (default 50 per pagina)
+- Sorteerbaar op `updatedAt`, `designCode`, `designName`
+- Filter op `status`, `collection`, `styleFamily`, `search` (designCode/designName)
+- Response: `{ designs, total, page, pageSize, totalPages }`
+
+**`src/app/page.tsx`** (622→~860 lines):
+- Debounced zoekveld (300ms) met server-side search
+- Dropdown filters voor collectie en stijlfamilie
+- Pagination controls (vorige/volgende + paginanummers)
+- Stats worden nu server-side berekend via `prisma.design.groupBy`
+
+**`src/app/globals.css`**:
+- Pagination styling toegevoegd
+
+### Fase 1.2: FR language support
+
+**`src/app/api/designs/[id]/content/route.ts`**: `'fr'` toegevoegd aan allowed languages
+**`src/app/api/workflow/bulk/route.ts`**: FR vertaalstap toegevoegd
+**`src/app/designs/[id]/page.tsx`**: FR content tab, vlag, vertaalknop
+
+### Fase 1.3: Remove unused dependencies
+
+- `openai` en `zustand` verwijderd uit package.json
+- Ongebruikte imports verwijderd uit `print.ts` en translate route
+
+### Fase 2: Health Check dashboard
+
+**`src/app/api/health/route.ts`** (~190 lines): 12 issue types, gepagineerd + filterable
+**`src/app/health/page.tsx`** (~435 lines): Category cards, klikbare filters, design links
+
+### Fase 3: Content Review dashboard
+
+**`src/app/api/review/route.ts`** (~170 lines): Importeert `checkContent` uit `lib/quality`
+**`src/app/review/page.tsx`** (~700 lines): Split-panel review UI met quality scoring
+**`src/lib/quality.ts`** (~150 lines): Geextraheerde `checkContent` functie, `FORBIDDEN_WORDS`, `AMPLIFIER_WORDS`
+
+### Fase 4: Post-Publish Verification
+
+**`src/app/api/designs/[id]/verify/route.ts`** (~404 lines): Uitgebreide Shopify product verificatie
+- Vergelijkt app-data met live Shopify product (titels, prijzen, metafields, varianten)
+**`src/app/designs/[id]/page.tsx`**: Verify knop + resultaten panel in Shopify sectie
+
+### Fase 5: Bulk Content Regeneration
+
+**`src/app/api/regenerate/route.ts`** (~349 lines): GET preview + POST execute
+**`src/app/regenerate/page.tsx`** (~370 lines): Selectie tabel, opties, resultaten
+
+### Fase 6: Automated Tests
+
+**`vitest.config.ts`**: Config met path aliases, excludeert integration tests
+**`src/lib/constants.test.ts`**: 41 tests
+**`src/lib/variants.test.ts`**: 16 tests (SKU builders)
+**`src/lib/quality.test.ts`**: 34 tests
+**Totaal**: 91 unit tests, alle geslaagd
+
+### 7a–7b: Commit + clean install
+
+7 commits op main branch gecommit. `npm install` voor schone node_modules.
+
+### 7c: Bulk status endpoint
+
+**`src/app/api/designs/bulk-status/route.ts`** (~80 lines):
+- Accepteert `{ designIds, status }`, valideert transities via `VALID_TRANSITIONS` map
+- Enkele `prisma.design.updateMany()` i.p.v. N individuele PATCH requests
+- Dashboard en review pagina aangepast om bulk-status endpoint te gebruiken
+
+### 7d: Detail page refactor
+
+**Origineel**: `src/app/designs/[id]/page.tsx` — 1862 regels, 30+ useState hooks
+**Na refactor**: 9 bestanden, page.tsx gereduceerd naar 696 regels (63% reductie)
+
+Nieuwe bestanden in `src/components/design-detail/`:
+- `types.ts` (126 regels): Alle gedeelde interfaces (Design, Variant, Content, etc.)
+- `shared.tsx` (275 regels): Lightbox, WorkflowProgress, SectionLabel, DisabledHint, ProgressBar, ActionRow, ContentField, MockupCard
+- `OverviewTab.tsx` (410 regels): Overzicht tab met acties, preview, publish, verify, fork, delete
+- `MockupsTab.tsx` (145 regels): Mockup generatie en weergave
+- `PrintFilesTab.tsx` (152 regels): Print file generatie en weergave
+- `ContentTab.tsx` (197 regels): Content editing, vertalingen, metafields preview
+- `VariantsTab.tsx` (97 regels): Varianten tabel met metafields
+- `EditModal.tsx` (72 regels): Design edit formulier modal
+
+### 7e: Integration tests + EAN bug fix
+
+**Test infrastructure:**
+- `src/test/setup-db.ts` (67 regels): Maakt temp SQLite DB aan via `prisma db push`, patcht globale Prisma singleton, ruimt op na tests
+- `vitest.integration.config.ts` (21 regels): Aparte vitest config voor integration tests
+- `package.json`: Nieuwe scripts `test:integration` en `test:all`
+
+**Integration tests:**
+- `src/lib/ean.integration.test.ts` (130 regels): 5 tests voor `generateNextEan` met echte DB
+- `src/lib/variants.integration.test.ts` (310 regels): 18 tests voor variant generatie (IB/MC/SP) met gemockte GS1 registratie
+
+**EAN bug fix** (`src/lib/ean.ts`):
+- `generateNextEan()` incrementeerde de volledige 13-cijferige EAN (inclusief check digit), herberekende dan de check digit — produceerde steeds dezelfde EAN
+- Fix: increment nu de 12-cijferige base i.p.v. het volledige 13-cijferige nummer
+- Bug was latent in productie omdat bestaande EANs via een ander proces waren aangemaakt
+
+**Test totalen na deze sessie:**
+- 91 unit tests (3 bestanden)
+- 23 integration tests (2 bestanden)
+- 114 totaal, alle geslaagd
