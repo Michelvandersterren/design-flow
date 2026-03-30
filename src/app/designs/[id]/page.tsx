@@ -226,6 +226,12 @@ export default function DesignDetail() {
   const [publishResult, setPublishResult] = useState<{ shopifyProductId?: string; handle?: string; error?: string } | null>(null)
   const [updatingShopify, setUpdatingShopify] = useState(false)
   const [updateShopifyResult, setUpdateShopifyResult] = useState<{ success?: boolean; error?: string } | null>(null)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<{
+    checks: { category: string; label: string; status: 'pass' | 'warn' | 'fail'; expected?: string; actual?: string; detail?: string }[]
+    summary: { pass: number; warn: number; fail: number }
+    verifiedAt: string
+  } | null>(null)
   const [forking, setForking] = useState(false)
   const [approving, setApproving] = useState(false)
   const shopifyConfigured = process.env.NEXT_PUBLIC_SHOPIFY_CONFIGURED === 'true'
@@ -410,6 +416,21 @@ export default function DesignDetail() {
       else setUpdateShopifyResult({ error: data.error || 'Update mislukt' })
     } catch { setUpdateShopifyResult({ error: 'Netwerkfout tijdens update' }) }
     finally { setUpdatingShopify(false) }
+  }
+
+  const verifyShopify = async () => {
+    if (!design) return
+    setVerifying(true)
+    setVerifyResult(null)
+    try {
+      const res = await fetch(`/api/designs/${params.id}/verify`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (data.checks) setVerifyResult({ checks: data.checks, summary: data.summary, verifiedAt: data.verifiedAt })
+      else setVerifyResult(null)
+    } catch { alert('Verificatie mislukt') }
+    finally { setVerifying(false) }
   }
 
   const generateMockups = async () => {
@@ -619,6 +640,7 @@ export default function DesignDetail() {
   const nlContent = design.content.find((c) => c.language === 'nl')
   const deContent = design.content.find((c) => c.language === 'de')
   const enContent = design.content.find((c) => c.language === 'en')
+  const frContent = design.content.find((c) => c.language === 'fr')
 
   const shopifyVariantId = design.variants.find((v) => v.shopifyProductId)?.shopifyProductId
   const alreadyOnShopify = !!shopifyVariantId
@@ -1043,6 +1065,79 @@ export default function DesignDetail() {
                     </div>
                   )}
 
+                  {/* Post-publish verificatie */}
+                  {alreadyOnShopify && (
+                    <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 12, marginTop: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Shopify verificatie</span>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={verifyShopify}
+                          disabled={verifying}
+                          style={{ fontSize: 11, padding: '4px 10px' }}
+                        >
+                          {verifying ? 'Controleren...' : 'Verifi\u00EBren'}
+                        </button>
+                      </div>
+                      {verifyResult && (
+                        <div style={{ fontSize: 12 }}>
+                          {/* Summary bar */}
+                          <div style={{ display: 'flex', gap: 12, marginBottom: 10, padding: '6px 10px', borderRadius: 6, background: '#f9fafb' }}>
+                            <span style={{ color: '#16a34a', fontWeight: 600 }}>{verifyResult.summary.pass} OK</span>
+                            {verifyResult.summary.warn > 0 && (
+                              <span style={{ color: '#d97706', fontWeight: 600 }}>{verifyResult.summary.warn} waarschuwing{verifyResult.summary.warn !== 1 ? 'en' : ''}</span>
+                            )}
+                            {verifyResult.summary.fail > 0 && (
+                              <span style={{ color: '#dc2626', fontWeight: 600 }}>{verifyResult.summary.fail} fout{verifyResult.summary.fail !== 1 ? 'en' : ''}</span>
+                            )}
+                            <span style={{ color: '#9ca3af', marginLeft: 'auto', fontSize: 11 }}>
+                              {new Date(verifyResult.verifiedAt).toLocaleTimeString('nl-NL')}
+                            </span>
+                          </div>
+                          {/* Checks grouped by category — only show non-pass */}
+                          {(() => {
+                            const issues = verifyResult.checks.filter((c) => c.status !== 'pass')
+                            if (issues.length === 0) {
+                              return (
+                                <div style={{ padding: '8px 10px', borderRadius: 6, background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac' }}>
+                                  Alle {verifyResult.checks.length} controles geslaagd
+                                </div>
+                              )
+                            }
+                            const categories = [...new Set(issues.map((c) => c.category))]
+                            return categories.map((cat) => (
+                              <div key={cat} style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+                                  {cat}
+                                </div>
+                                {issues.filter((c) => c.category === cat).map((check, idx) => (
+                                  <div key={idx} style={{
+                                    display: 'flex', alignItems: 'flex-start', gap: 6, padding: '4px 0', fontSize: 12,
+                                    color: check.status === 'fail' ? '#dc2626' : '#92400e',
+                                  }}>
+                                    <span style={{ flexShrink: 0 }}>{check.status === 'fail' ? '\uD83D\uDD34' : '\uD83D\uDFE1'}</span>
+                                    <div>
+                                      <span style={{ fontWeight: 500 }}>{check.label}</span>
+                                      {check.expected && check.actual && (
+                                        <span style={{ color: '#9ca3af' }}> — verwacht: {check.expected}, gevonden: {check.actual}</span>
+                                      )}
+                                      {!check.expected && check.actual && (
+                                        <span style={{ color: '#9ca3af' }}> — {check.actual}</span>
+                                      )}
+                                      {check.detail && (
+                                        <span style={{ color: '#9ca3af' }}> — {check.detail}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ))
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Fork naar ander producttype */}
                   {(() => {
                     const otherTypes = ([
@@ -1398,18 +1493,18 @@ export default function DesignDetail() {
             )
           })()}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
-            {(['nl', 'de', 'en'] as const).map((lang) => {
-              const c = lang === 'nl' ? nlContent : lang === 'de' ? deContent : enContent
+            {(['nl', 'de', 'en', 'fr'] as const).map((lang) => {
+              const c = lang === 'nl' ? nlContent : lang === 'de' ? deContent : lang === 'en' ? enContent : frContent
               const editing = contentEditMode[lang]
               const vals = contentEditValues[lang]
               const isSaving = contentSaving[lang]
-              const langLabel = { nl: 'Nederlands', de: 'Deutsch', en: 'English' }[lang]
+              const langLabel = { nl: 'Nederlands', de: 'Deutsch', en: 'English', fr: 'Français' }[lang]
 
               return (
                 <div className="card" key={lang}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <h2 style={{ margin: 0 }}>
-                      <span style={{ fontSize: 16, marginRight: 6 }}>{lang === 'nl' ? '🇳🇱' : lang === 'de' ? '🇩🇪' : '🇬🇧'}</span>
+                      <span style={{ fontSize: 16, marginRight: 6 }}>{lang === 'nl' ? '🇳🇱' : lang === 'de' ? '🇩🇪' : lang === 'en' ? '🇬🇧' : '🇫🇷'}</span>
                       {langLabel}
                     </h2>
                     {c && !editing && (
@@ -1471,6 +1566,9 @@ export default function DesignDetail() {
                               </button>
                               <button className="btn btn-secondary btn-sm" onClick={() => translateContent('en')} disabled={translating === 'en'}>
                                 {translating === 'en' ? 'Vertalen...' : enContent ? '→ EN opnieuw' : '→ EN vertalen'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => translateContent('fr')} disabled={translating === 'fr'}>
+                                {translating === 'fr' ? 'Vertalen...' : frContent ? '→ FR opnieuw' : '→ FR vertalen'}
                               </button>
                             </>
                           )}

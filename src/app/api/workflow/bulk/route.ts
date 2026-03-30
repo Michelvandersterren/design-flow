@@ -26,7 +26,8 @@ type DesignResult = {
  * 1. AI content genereren (NL)
  * 2. Vertalen naar DE
  * 3. Vertalen naar EN
- * 4. Varianten aanmaken
+ * 4. Vertalen naar FR
+ * 5. Varianten aanmaken
  *
  * Body (optioneel):
  *   { designIds: string[] }   — specifieke designs
@@ -160,7 +161,28 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // ── Stap 4: Varianten aanmaken ───────────────────────────────────
+      // ── Stap 4: Vertalen naar FR ─────────────────────────────────────
+      const existingFr = await prisma.content.findUnique({
+        where: { designId_language: { designId: design.id, language: 'fr' } },
+      })
+
+      if (existingFr?.description) {
+        steps.push({ step: 'translate_fr', status: 'skipped', detail: 'Al aanwezig' })
+      } else {
+        try {
+          const nlContentForFr = await prisma.content.findUnique({
+            where: { designId_language: { designId: design.id, language: 'nl' } },
+          })
+          if (!nlContentForFr) throw new Error('NL content niet gevonden')
+
+          await translateContent(nlContentForFr.id, 'fr')
+          steps.push({ step: 'translate_fr', status: 'ok' })
+        } catch (err) {
+          steps.push({ step: 'translate_fr', status: 'error', detail: String(err) })
+        }
+      }
+
+      // ── Stap 5: Varianten aanmaken ───────────────────────────────────
       try {
         const variantResult = await generateVariantsForDesign(design.id)
         const totalCreated = Object.values(variantResult).reduce((s, r) => s + r.created.length, 0)
@@ -236,6 +258,8 @@ export async function GET() {
       status: d.status,
       hasNlContent: d.content.some((c) => c.language === 'nl'),
       hasDeContent: d.content.some((c) => c.language === 'de'),
+      hasEnContent: d.content.some((c) => c.language === 'en'),
+      hasFrContent: d.content.some((c) => c.language === 'fr'),
       variantCount: d.variants.length,
       productTypes: Array.from(new Set(d.variants.map((v) => v.productType))),
     })),

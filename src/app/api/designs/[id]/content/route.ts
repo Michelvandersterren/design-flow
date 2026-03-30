@@ -16,8 +16,8 @@ export async function PATCH(
     const body = await request.json()
     const { language, description, longDescription, seoTitle, seoDescription, googleShoppingDescription } = body
 
-    if (!language || !['nl', 'de', 'en'].includes(language)) {
-      return NextResponse.json({ error: 'Ongeldige taal — gebruik nl, de of en' }, { status: 400 })
+    if (!language || !['nl', 'de', 'en', 'fr'].includes(language)) {
+      return NextResponse.json({ error: 'Ongeldige taal — gebruik nl, de, en of fr' }, { status: 400 })
     }
 
     // Only update fields that are explicitly provided (not undefined)
