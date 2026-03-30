@@ -1,25 +1,47 @@
 /**
  * GS1 NL Integration
  *
- * Authorization API: POST https://gs1nl-api-acc.gs1.nl/authorization/token
+ * Authorization API: POST {GS1_BASE_URL}/authorization/token
  *   - client_id and client_secret sent as request headers
+ *   - Ocp-Apim-Subscription-Key header (Azure APIM subscription key)
  *   - Returns: { access_token, expires_in, token_type, scope }
  *
- * GTIN Registration API: POST https://gs1nl-api-acc.gs1.nl/gtin-registration-api/RegistrateGtinProducts
+ * GTIN Registration API: POST {GS1_BASE_URL}/gtin-registration-api/RegistrateGtinProducts
  *   - Bearer token in Authorization header
+ *   - Ocp-Apim-Subscription-Key header (Azure APIM subscription key)
  *   - Async bulk process — we fire-and-forget per variant (non-fatal)
+ *
+ * Environment: set GS1_BASE_URL to switch between acceptance and production.
+ *   - Acceptance: https://gs1nl-api-acc.gs1.nl (default)
+ *   - Production: https://gs1nl-api.gs1.nl
+ *
+ * Required env vars:
+ *   GS1_CLIENT_ID       — OAuth client ID (from MijnGS1 > Mijn API's > Authenticatie)
+ *   GS1_CLIENT_SECRET    — OAuth client secret (created in MijnGS1)
+ *   GS1_API_KEY          — Azure APIM subscription key (from GS1 developer portal)
+ *   GS1_ACCOUNT_NUMBER   — GS1 account/GLN number
+ *   GS1_CONTRACT_NUMBER  — GS1 contract number (e.g. 10074745)
  */
 
 import {
+  GS1_API_KEY,
   GS1_CLIENT_ID,
   GS1_CLIENT_SECRET,
   GS1_ACCOUNT_NUMBER,
   GS1_CONTRACT_NUMBER,
+  GS1_BASE_URL,
 } from './env'
 
-const AUTH_URL = 'https://gs1nl-api-acc.gs1.nl/authorization/token'
-const GTIN_REGISTER_URL =
-  'https://gs1nl-api-acc.gs1.nl/gtin-registration-api/RegistrateGtinProducts'
+const AUTH_URL = `${GS1_BASE_URL}/authorization/token`
+const GTIN_REGISTER_URL = `${GS1_BASE_URL}/gtin-registration-api/RegistrateGtinProducts`
+
+/** GPC categories per KitchenArt product type (validated against GS1 Reference Data) */
+const GPC_BY_PRODUCT_TYPE: Record<string, string> = {
+  IB: 'Snijplanken',
+  SP: 'Wandbekleding - Sierobjecten',
+  MC: 'Schilderijen',
+}
+const DEFAULT_GPC = 'Schilderijen'
 
 // ── Token cache ──────────────────────────────────────────────────────────────
 
@@ -36,12 +58,20 @@ async function fetchAccessToken(): Promise<string> {
     return tokenCache.token
   }
 
+  const authHeaders: Record<string, string> = {
+    'Content-Length': '0',
+    client_id: GS1_CLIENT_ID,
+    client_secret: GS1_CLIENT_SECRET,
+  }
+  // Azure APIM subscription key (required for all GS1 API calls)
+  if (GS1_API_KEY) {
+    authHeaders['Ocp-Apim-Subscription-Key'] = GS1_API_KEY
+  }
+
   const res = await fetch(AUTH_URL, {
     method: 'POST',
-    headers: {
-      client_id: GS1_CLIENT_ID,
-      client_secret: GS1_CLIENT_SECRET,
-    },
+    headers: authHeaders,
+    body: '',
   })
 
   if (!res.ok) {
@@ -76,8 +106,10 @@ export interface RegisterGtinOptions {
   gtin: string
   /** Short product description (max 300 chars) */
   description: string
-  /** Brand name (max 70 chars) */
+  /** Brand name (max 70 chars). Defaults to 'KitchenArt'. */
   brandName?: string
+  /** Product type code (IB/SP/MC) for GPC category selection */
+  productType?: string
 }
 
 /**
@@ -91,11 +123,15 @@ export interface RegisterGtinOptions {
  */
 export async function registerGtin(opts: RegisterGtinOptions): Promise<boolean> {
   // Skip silently when credentials are absent (dev / CI)
-  if (!GS1_CLIENT_ID || !GS1_CLIENT_SECRET || !GS1_ACCOUNT_NUMBER) {
+  if (!GS1_CLIENT_ID || !GS1_CLIENT_SECRET || !GS1_ACCOUNT_NUMBER || !GS1_API_KEY) {
     return false
   }
 
   const token = await fetchAccessToken()
+
+  const gpc = opts.productType
+    ? (GPC_BY_PRODUCT_TYPE[opts.productType] ?? DEFAULT_GPC)
+    : DEFAULT_GPC
 
   const body = {
     accountnumber: GS1_ACCOUNT_NUMBER,
@@ -105,14 +141,13 @@ export async function registerGtin(opts: RegisterGtinOptions): Promise<boolean> 
         // Provide the full 13-digit GTIN (API also accepts 14-digit with leading 0)
         Gtin: opts.gtin,
         Status: 'Actief',
-        // Generic GPC category — can be made configurable later
-        Gpc: 'Huishoudtextiel - Overig',
+        Gpc: gpc,
         ConsumerUnit: 'Ja',
         PackagingType: 'Envelopverpakking',
         TargetMarketCountry: 'Nederland',
         Description: opts.description.slice(0, 300),
         Language: 'Nederlands',
-        BrandName: (opts.brandName ?? 'Splash & Grab').slice(0, 70),
+        BrandName: (opts.brandName ?? 'KitchenArt').slice(0, 70),
         SubBrandName: '',
         NetContent: 1,
         MeasurementUnit: 'Stuk',
@@ -122,12 +157,17 @@ export async function registerGtin(opts: RegisterGtinOptions): Promise<boolean> 
     ],
   }
 
+  const regHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  }
+  if (GS1_API_KEY) {
+    regHeaders['Ocp-Apim-Subscription-Key'] = GS1_API_KEY
+  }
+
   const res = await fetch(GTIN_REGISTER_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: regHeaders,
     body: JSON.stringify(body),
   })
 

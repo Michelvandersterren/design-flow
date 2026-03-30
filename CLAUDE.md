@@ -1054,3 +1054,30 @@ Audit van bestaande Shopify producten (manueel gepubliceerd) versus de `buildSho
 ### Openstaand na deze sessie
 - Test product `10297656967510` (Farm Reflectie Herfst MC) staat als DRAFT op Shopify met correcte structuur
 - Oudere test producten mogelijk nog aanwezig: `10297428607318` (IB), `10297482281302` (SP) — opruimen
+
+---
+
+## Session — 2026-03-30: SP PSD paths fix + SP variant image support
+
+### Changes
+
+**`src/lib/mockup-config.ts`**:
+- Fixed all 12 SP size-specific PSD paths: `Mockup-4 {size}.psd` → `Mockup_spatwand_1_{size}.psd`
+- Root cause: PSD files on disk were renamed from `Mockup-4` to `Mockup_spatwand_1` but config was never updated
+- Template IDs (`SP-mockup4-*`) kept unchanged for backward compatibility with existing DB records
+
+**`src/lib/shopify.ts`**:
+- Added `SP_SIZED_ORDER` array with all 12 size-specific template IDs (sorted by size: 60x30 → 120x80)
+- SP image building now includes size-specific images after generic sfeer mockups (was: "SP has no size-specific variant images")
+- Hero duplicate for SP now explicitly strips `sizeKey: undefined` (consistent with IB hero handling)
+- Added SP variant image assignment in `createShopifyProduct()`:
+  - SKU format: `SP-CODE-WIDTH-HEIGHT-MATERIAL` (5 parts) — material is last, width/height are 3rd/2nd from last
+  - sizeKey extraction: `parts[parts.length - 3]x${parts[parts.length - 2]}` (direct match, no alias mapping needed)
+  - All 3 materials (G, BH0, BH4) for same size share the same image
+- Updated variant assignment comment: SP now documented alongside IB and MC
+
+### SP disk files noted but not added to config
+- `Mockup_spatwand_1.psd` (160 MB, generic without size) — new template on disk, not in config. Larger than existing templates; purpose unclear. Skipped for now to maintain consistency with existing Shopify products.
+- `kitchen splash new smart object.psb` — new PSB file, not relevant for mockup config.
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors

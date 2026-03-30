@@ -25,8 +25,25 @@ export function isValidEan13(ean: string): boolean {
 }
 
 /**
+ * KitchenArt GS1 configuration.
+ *
+ * Prefix:       87214768 (8 digits)
+ * Contract:     10074745
+ * Package:      10,000 codes (87214768 0000-9999 + check digit)
+ * In use:       8,125 codes (8721476800001 - 8721476881246)
+ * Available:    1,875 codes
+ */
+const GS1_PREFIX = '87214768'
+
+// Last EAN assigned in GS1 export (8720796241433-products.xlsx, sheet 10074745)
+const SEED_LAST_EAN = 8721476881246
+
+/**
  * Generate the next EAN-13 by finding the current max in the DB and incrementing.
- * Uses KitchenArt's GS1 prefix (8721476).
+ * Falls back to SEED_LAST_EAN (last known assigned code from GS1 export) when
+ * the DB has no EANs yet, ensuring we never reuse an existing code.
+ *
+ * Throws if the next product number would exceed the 10,000 code range.
  */
 export async function generateNextEan(): Promise<string> {
   const result = await prisma.variant.findFirst({
@@ -35,9 +52,16 @@ export async function generateNextEan(): Promise<string> {
     select: { ean: true },
   })
 
-  // Base: max existing + 1, or start at 8721476881240 if no EANs exist
-  const maxEan = result?.ean ? parseInt(result.ean, 10) : 8721476881239
+  const maxEan = result?.ean ? parseInt(result.ean, 10) : SEED_LAST_EAN
   const nextBase12 = String(maxEan + 1).slice(0, 12)
+
+  // Safety check: ensure we stay within the GS1 prefix range
+  if (!nextBase12.startsWith(GS1_PREFIX)) {
+    throw new Error(
+      `EAN range exhausted: next base ${nextBase12} is outside prefix ${GS1_PREFIX}. ` +
+      `Contact GS1 NL to extend your code package.`
+    )
+  }
 
   const checkDigit = ean13CheckDigit(nextBase12)
   return nextBase12 + checkDigit

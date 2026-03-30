@@ -14,6 +14,27 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { registerGtin } from '@/lib/gs1'
 
+/**
+ * GET /api/ean/gs1-sync
+ * Preview: how many variants need GS1 registration.
+ */
+export async function GET() {
+  const unregistered = await prisma.variant.count({
+    where: { ean: { not: null }, gs1Registered: false },
+  })
+  const registered = await prisma.variant.count({
+    where: { gs1Registered: true },
+  })
+
+  return NextResponse.json({
+    unregistered,
+    registered,
+    message: unregistered > 0
+      ? `${unregistered} variant(s) ready for GS1 registration. POST to this endpoint to register.`
+      : 'All variants with EANs are already registered with GS1.',
+  })
+}
+
 export async function POST() {
   // Fetch all variants with an EAN that haven't been registered yet
   const variants = await prisma.variant.findMany({
@@ -44,7 +65,7 @@ export async function POST() {
     } else if (variant.productType === 'IB') {
       description = `Inductieplaat ${variant.size}mm`
     } else if (variant.productType === 'MC') {
-      description = `Magnetische cirkel ${variant.size}mm`
+      description = `Muurcirkel ${variant.size}mm`
     } else {
       description = `Product ${variant.productType} ${variant.size}`
     }
@@ -53,7 +74,8 @@ export async function POST() {
       const ok = await registerGtin({
         gtin: variant.ean,
         description,
-        brandName: 'Splash & Grab',
+        brandName: 'KitchenArt',
+        productType: variant.productType,
       })
       if (ok) {
         await prisma.variant.update({

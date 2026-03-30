@@ -7,9 +7,9 @@ import { registerGtin } from './gs1'
  * Helper: attempt GS1 registration and update the DB flag.
  * Always non-fatal — logs a warning on failure.
  */
-async function tryRegisterGtin(variantId: string, ean: string, description: string) {
+async function tryRegisterGtin(variantId: string, ean: string, description: string, productType?: string) {
   try {
-    const registered = await registerGtin({ gtin: ean, description, brandName: 'Splash & Grab' })
+    const registered = await registerGtin({ gtin: ean, description, brandName: 'KitchenArt', productType })
     if (registered) {
       await prisma.variant.update({ where: { id: variantId }, data: { gs1Registered: true } })
     }
@@ -90,7 +90,7 @@ export async function generateSpVariants(designId: string, designCode: string) {
       })
 
       if (variant.ean) {
-        await tryRegisterGtin(variant.id, variant.ean, `Spatscherm ${size.width}x${size.height}mm ${mat.code}`)
+        await tryRegisterGtin(variant.id, variant.ean, `Spatscherm ${size.width}x${size.height}mm ${mat.code}`, 'SP')
       }
 
       created.push(variant)
@@ -131,7 +131,7 @@ export async function generateIbVariants(designId: string, designCode: string) {
     })
 
     if (variant.ean) {
-      await tryRegisterGtin(variant.id, variant.ean, `Inductieplaat ${size.width}x${size.height}mm`)
+      await tryRegisterGtin(variant.id, variant.ean, `Inductieplaat ${size.width}x${size.height}mm`, 'IB')
     }
 
     created.push(variant)
@@ -175,7 +175,7 @@ export async function generateMcVariants(designId: string, designCode: string) {
       })
 
       if (variant.ean) {
-        await tryRegisterGtin(variant.id, variant.ean, `Muurcirkel ${size.diameter}mm ${mat.label}`)
+        await tryRegisterGtin(variant.id, variant.ean, `Muurcirkel ${size.diameter}mm ${mat.label}`, 'MC')
       }
 
       created.push(variant)

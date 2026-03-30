@@ -1,6 +1,7 @@
 import { prisma } from './prisma'
 import { IB_SIZES, SP_SIZES, SP_MATERIALS, MC_MATERIALS, MC_SIZES } from './constants'
 import { getDriveDirectUrl } from './drive'
+import { IB_SIZE_KEY_ALIASES } from './mockup-config'
 
 // Static material labels per product type (matches BrandVoice materialIB/SP).
 // MC is excluded: material varies per variant (Aluminium Dibond / Forex).
@@ -119,6 +120,7 @@ export async function buildShopifyProduct(designId: string) {
     } catch {}
     return value.split(',').map((s) => s.trim()).filter(Boolean)
   }
+  tags.push('via_enabled')
   if (design.styleFamily) tags.push(design.styleFamily)
   tags.push(...parseField(design.collections))
   tags.push(...parseField(design.colorTags))
@@ -268,15 +270,94 @@ export async function buildShopifyProduct(designId: string) {
     ? [{ name: 'Formaat' }, { name: firstType === 'SP' ? 'Bevestigingsopties' : 'Materiaal' }]
     : [{ name: 'Formaten' }]
 
-  // Build images array from saved mockups.
-  // Use absolute=true to get the direct drive.usercontent.google.com URL —
-  // Shopify fetches this server-side so there is no browser CORP restriction.
-  // NOTE: images are NOT included in the product create payload (too many causes Shopify 500).
-  // They are uploaded separately after product creation in createShopifyProduct().
-  const images = (design.mockups ?? []).map((m) => ({
-    src: getDriveDirectUrl(m.driveFileId, true),
-    alt: m.altText ?? undefined,
-  }))
+  // ---------------------------------------------------------------------------
+  // Build images array in correct Shopify order per product type.
+  //
+  // Pattern (from existing Shopify products):
+  //   IB: [hero=largest product shot (dup)] + 5 generic sfeer + 7 size-specific with variant mapping
+  //   SP: [hero=first sfeer (dup)] + 5 generic sfeer (no size-specific variants)
+  //   MC: [hero=circleart (dup)] + 6 generic sfeer + mockup-8 + 4 size-specific with variant mapping
+  //
+  // Each image entry has: src, alt, sizeKey? (for variant assignment later), isHeroDuplicate?
+  // ---------------------------------------------------------------------------
+  type ImageEntry = { src: string; alt?: string; sizeKey?: string; isHeroDuplicate?: boolean }
+
+  // Predefined template ordering per product type (matches existing Shopify products)
+  const IB_GENERIC_ORDER = ['IB-mockup3', 'IB-mockup5', 'IB-mockup4', 'IB-mockup6', 'IB-mockup02']
+  const IB_SIZED_ORDER = [
+    'IB-mockup1-52x35', 'IB-mockup1-59x50', 'IB-mockup1-70x52',
+    'IB-mockup1-75x52', 'IB-mockup1-80x52', 'IB-mockup1-86x52', 'IB-mockup1-90x52',
+  ]
+  // Note: IB-mockup1-50x35 is excluded — existing Shopify products don't include it (520x350 is the smallest)
+  const SP_GENERIC_ORDER = ['SP-mockup1', 'SP-mockup2', 'SP-mockup3', 'SP-mockup5', 'SP-mockup7']
+  const SP_SIZED_ORDER = [
+    'SP-mockup4-60x30', 'SP-mockup4-60x40',
+    'SP-mockup4-70x30', 'SP-mockup4-70x50',
+    'SP-mockup4-80x40', 'SP-mockup4-80x55',
+    'SP-mockup4-90x45', 'SP-mockup4-90x60',
+    'SP-mockup4-100x50', 'SP-mockup4-100x65',
+    'SP-mockup4-120x60', 'SP-mockup4-120x80',
+  ]
+  const MC_GENERIC_ORDER = ['MC-circleart', 'MC-lifestyle', 'MC-mockup3', 'MC-mockup5', 'MC-mockup6', 'MC-mockup7', 'MC-mockup8']
+  const MC_SIZED_ORDER = ['MC-40cm', 'MC-60cm', 'MC-80cm', 'MC-100cm']
+
+  const mockupMap = new Map((design.mockups ?? []).map((m) => [m.templateId, m]))
+
+  const findMockup = (templateId: string): ImageEntry | null => {
+    const m = mockupMap.get(templateId)
+    if (!m) return null
+    return {
+      src: getDriveDirectUrl(m.driveFileId, true),
+      alt: m.altText ?? undefined,
+      sizeKey: m.sizeKey ?? undefined,
+    }
+  }
+
+  const images: ImageEntry[] = []
+
+  if (firstType === 'IB') {
+    // Hero: largest size-specific shot (90x52), uploaded as generic (no variant assignment)
+    const hero = findMockup('IB-mockup1-90x52')
+    if (hero) images.push({ ...hero, sizeKey: undefined, isHeroDuplicate: true })
+    // Generic sfeer mockups
+    for (const tid of IB_GENERIC_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push(img)
+    }
+    // Size-specific product shots (with sizeKey for variant assignment)
+    for (const tid of IB_SIZED_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push(img)
+    }
+  } else if (firstType === 'SP') {
+    // Hero: first sfeer mockup, duplicated
+    const hero = findMockup('SP-mockup1')
+    if (hero) images.push({ ...hero, sizeKey: undefined, isHeroDuplicate: true })
+    // Generic sfeer mockups (SP-mockup1 appears again as the real image)
+    for (const tid of SP_GENERIC_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push(img)
+    }
+    // Size-specific product shots (with sizeKey for variant assignment)
+    for (const tid of SP_SIZED_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push(img)
+    }
+  } else if (firstType === 'MC') {
+    // Hero: circleart, duplicated
+    const hero = findMockup('MC-circleart')
+    if (hero) images.push({ ...hero, isHeroDuplicate: true })
+    // Generic sfeer mockups (MC-circleart appears again, plus MC-mockup8 treated as generic)
+    for (const tid of MC_GENERIC_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push({ ...img, sizeKey: undefined }) // MC-mockup8 has sizeKey but is treated as generic
+    }
+    // Size-specific product shots (with sizeKey for variant assignment)
+    for (const tid of MC_SIZED_ORDER) {
+      const img = findMockup(tid)
+      if (img) images.push(img)
+    }
+  }
 
   return {
     product: {
@@ -352,6 +433,10 @@ function formatIbLabel(widthMm: number, heightMm: number): string {
  *
  * Images are uploaded separately after product creation in batches of 3
  * to avoid Shopify 500 errors from too many images in a single request.
+ *
+ * After upload:
+ *  - Size-specific images are assigned to their matching variants
+ *  - beschrijving_afbeelding metafield is set to the image at position 2
  */
 export async function createShopifyProduct(designId: string) {
   const { images, ...payload } = await buildShopifyProduct(designId)
@@ -363,24 +448,142 @@ export async function createShopifyProduct(designId: string) {
   const shopifyProduct = data.product
   const shopifyProductId = String(shopifyProduct.id)
 
-  // Upload images in batches of 3 (Shopify downloads each from Google Drive server-side)
+  // ---------------------------------------------------------------------------
+  // Upload images sequentially in batches of 3.
+  // Track the Shopify image ID returned for each entry so we can later assign
+  // variant images and set beschrijving_afbeelding.
+  // ---------------------------------------------------------------------------
+  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string }
+  const uploadedImages: UploadedImage[] = []
+
   if (images.length > 0) {
     const BATCH_SIZE = 3
     for (let i = 0; i < images.length; i += BATCH_SIZE) {
       const batch = images.slice(i, i + BATCH_SIZE)
-      await Promise.all(
-        batch.map((img) =>
+      const results = await Promise.all(
+        batch.map((img, batchIdx) =>
           shopifyFetch(`/products/${shopifyProductId}/images.json`, {
             method: 'POST',
             body: JSON.stringify({ image: { src: img.src, alt: img.alt } }),
             timeoutMs: 60000, // 60s per image — Shopify downloads from Google Drive
-          }).catch((err) => {
+          }).then((res) => ({
+            success: true as const,
+            data: res,
+            idx: i + batchIdx,
+            sizeKey: img.sizeKey,
+          })).catch((err) => {
             console.error(`Image upload failed for ${img.alt ?? 'unknown'}:`, err)
-            // Non-fatal: continue with remaining images
+            return { success: false as const, idx: i + batchIdx, sizeKey: img.sizeKey }
           })
         )
       )
+      for (const r of results) {
+        if (r.success && r.data?.image) {
+          uploadedImages.push({
+            shopifyImageId: r.data.image.id,
+            shopifyMediaId: r.data.image.admin_graphql_api_id,
+            position: r.data.image.position,
+            sizeKey: r.sizeKey,
+          })
+        }
+      }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Assign variant images: link size-specific images to their Shopify variants.
+  //
+  // IB: each size-specific mockup has a sizeKey (e.g. "900x520"). Multiple
+  //     variants map to the same mockup via IB_SIZE_KEY_ALIASES.
+  // MC: each size-specific mockup has a sizeKey (e.g. "600"). Both ADI and
+  //     FRX variants with the same diameter share the image.
+  // SP: each size-specific mockup has a sizeKey (e.g. "600x300"). All 3
+  //     materials (G, BH0, BH4) for the same size share the image.
+  // ---------------------------------------------------------------------------
+  const firstType = shopifyProduct.variants?.[0]?.sku?.split('-')[0] as string | undefined
+
+  if (uploadedImages.length > 0 && shopifyProduct.variants?.length > 0) {
+    const sizedImages = uploadedImages.filter((img) => img.sizeKey)
+
+    if (sizedImages.length > 0) {
+      // Build variant sizeKey → Shopify variant IDs map
+      const variantsByMockupSizeKey = new Map<string, number[]>()
+
+      for (const sv of shopifyProduct.variants as Array<{ id: number; sku: string }>) {
+        if (!sv.sku) continue
+        // Extract variant sizeKey from SKU: IB-CODE-WIDTH-HEIGHT or MC-CODE-DIAM-MAT-SUFFIX
+        let variantSizeKey: string | undefined
+        let mockupSizeKey: string | undefined
+
+        if (firstType === 'IB') {
+          // SKU: IB-CODE-WIDTH-HEIGHT → sizeKey = "WIDTHxHEIGHT"
+          const parts = sv.sku.split('-')
+          if (parts.length >= 4) {
+            variantSizeKey = `${parts[parts.length - 2]}x${parts[parts.length - 1]}`
+            mockupSizeKey = IB_SIZE_KEY_ALIASES[variantSizeKey] ?? variantSizeKey
+          }
+        } else if (firstType === 'MC') {
+          // SKU: MC-CODE-DIAM-MAT-SUFFIX → sizeKey = "DIAM"
+          const parts = sv.sku.split('-')
+          if (parts.length >= 4) {
+            mockupSizeKey = parts[2] // diameter, e.g. "600"
+          }
+        } else if (firstType === 'SP') {
+          // SKU: SP-CODE-WIDTH-HEIGHT-MATERIAL → sizeKey = "WIDTHxHEIGHT"
+          // Multiple materials (G, BH0, BH4) share same size-specific image
+          const parts = sv.sku.split('-')
+          if (parts.length >= 5) {
+            // Width is 3rd-to-last, Height is 2nd-to-last (last is material code)
+            mockupSizeKey = `${parts[parts.length - 3]}x${parts[parts.length - 2]}`
+          }
+        }
+
+        if (mockupSizeKey) {
+          const existing = variantsByMockupSizeKey.get(mockupSizeKey) ?? []
+          existing.push(sv.id)
+          variantsByMockupSizeKey.set(mockupSizeKey, existing)
+        }
+      }
+
+      // Update each sized image with its variant IDs
+      await Promise.all(
+        sizedImages
+          .filter((img) => {
+            const variantIds = variantsByMockupSizeKey.get(img.sizeKey!)
+            return variantIds && variantIds.length > 0
+          })
+          .map((img) => {
+            const variantIds = variantsByMockupSizeKey.get(img.sizeKey!)!
+            return shopifyFetch(`/products/${shopifyProductId}/images/${img.shopifyImageId}.json`, {
+              method: 'PUT',
+              body: JSON.stringify({ image: { id: img.shopifyImageId, variant_ids: variantIds } }),
+            }).catch((err) => {
+              console.error(`Variant image assignment failed for sizeKey ${img.sizeKey}:`, err)
+            })
+          })
+      )
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Set beschrijving_afbeelding metafield to the image at position 2.
+  // This is a file_reference metafield that requires a MediaImage GID.
+  // ---------------------------------------------------------------------------
+  const pos2Image = uploadedImages.find((img) => img.position === 2)
+  if (pos2Image) {
+    await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
+      method: 'POST',
+      body: JSON.stringify({
+        metafield: {
+          namespace: 'custom',
+          key: 'beschrijving_afbeelding',
+          value: pos2Image.shopifyMediaId,
+          type: 'file_reference',
+        },
+      }),
+    }).catch((err) => {
+      console.error('Failed to set beschrijving_afbeelding metafield:', err)
+    })
   }
 
   // Save Shopify IDs back to variants (parallel — was sequential for-loop)
