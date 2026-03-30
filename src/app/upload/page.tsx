@@ -180,10 +180,6 @@ export default function UploadPage() {
 
   return (
     <div style={{ maxWidth: 600, margin: '0 auto', padding: '40px 20px' }}>
-      <div style={{ marginBottom: 20 }}>
-        <a href="/" style={{ color: '#6b7280', fontSize: 14, textDecoration: 'none' }}>← Terug naar dashboard</a>
-      </div>
-
       <h1 style={{ margin: '0 0 4px' }}>Design uploaden</h1>
       <p style={{ color: '#6b7280', marginBottom: 28, fontSize: 14 }}>
         De AI analyseert je design en stelt een naam, code en collecties voor.

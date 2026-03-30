@@ -169,9 +169,6 @@ export default function BrandVoicePage() {
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saved && <span style={{ color: '#16a34a', fontSize: 14 }}>Opgeslagen</span>}
-            <a href="/" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
-              Terug naar dashboard
-            </a>
             <button className="btn btn-primary" onClick={save} disabled={saving}>
               {saving ? 'Opslaan...' : 'Opslaan'}
             </button>

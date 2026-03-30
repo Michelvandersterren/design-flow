@@ -135,6 +135,16 @@ ${driveFileId ? 'Beschrijf het design visueel accuraat op basis van de afbeeldin
 4. SEO meta beschrijving: max 160 tekens, wervend, bevat relevante keywords.
 5. Google Shopping beschrijving (googleShoppingDescription): 300–500 tekens, feitelijk en feature-gedreven (geen emotionele taal), noem materiaal, afmetingen en gebruik — geschikt voor Google Shopping feed.
 
+HARDE SCHRIJFREGELS (deze regels gaan boven alles):
+- NOOIT em-dashes (—) gebruiken, ook niet als scheidingsteken midden in een zin. Gebruik komma's, punten of puntkomma's.
+- NOOIT en-dashes (–) gebruiken als scheidingsteken in lopende tekst. En-dashes mogen alleen in producttitels (bijv. "Design – Muurcirkel").
+- Geen drieledige contrasten ("X, maar niet Y. A, maar niet B.").
+- Geen retorische vragen als opening.
+- Geen slotzinnen die alleen samenvatten wat net is gezegd.
+- Geen "echt", "werkelijk", "daadwerkelijk" als versterker.
+- Geen "naadloos", "moeiteloos", "perfect", "optimaal", "ultiem".
+- Varieer in zinslengte en aanpak per design. Niet elke beschrijving mag hetzelfde patroon volgen.
+
 Geef het resultaat als JSON met keys: description, longDescription, seoTitle, seoDescription, googleShoppingDescription`
 
   try {

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 
 interface DesignMockup {
@@ -246,6 +247,8 @@ export default function DesignDetail() {
   const [savedPrintFiles, setSavedPrintFiles] = useState<DesignPrintFile[]>([])
   const [newPrintFileResults, setNewPrintFileResults] = useState<PrintFileResult[] | null>(null)
 
+  const [deleting, setDeleting] = useState(false)
+
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<{
     designName: string
@@ -358,6 +361,22 @@ export default function DesignDetail() {
       } else alert('Fork mislukt: ' + (data.error || 'onbekende fout'))
     } catch { alert('Fork fout') }
     finally { setForking(false) }
+  }
+
+  const deleteDesign = async () => {
+    if (!design) return
+    if (!confirm(`"${design.designName}" definitief verwijderen? Dit kan niet ongedaan worden.`)) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/designs/${params.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.success) {
+        router.push('/')
+      } else {
+        alert('Verwijderen mislukt: ' + (data.error || 'onbekende fout'))
+      }
+    } catch { alert('Verwijderen mislukt door netwerkfout') }
+    finally { setDeleting(false) }
   }
 
   const publishToShopify = async () => {
@@ -641,15 +660,16 @@ export default function DesignDetail() {
         borderRadius: 0,
       }}>
         <div className="container" style={{ padding: '12px 20px' }}>
-          {/* Back + title row */}
+           {/* Breadcrumbs + title row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <button
-              onClick={() => { if (window.history.length > 1) { router.back() } else { router.push('/') } }}
-              className="btn btn-secondary"
-              style={{ fontSize: 12, padding: '5px 12px', flexShrink: 0 }}
-            >
-              ← Terug
-            </button>
+            <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9ca3af', flexShrink: 0 }}>
+              <Link href="/" style={{ color: '#6b7280', textDecoration: 'none' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#6b7280' }}
+              >Dashboard</Link>
+              <span>/</span>
+              <span style={{ color: '#374151', fontWeight: 500 }}>{design.designCode}</span>
+            </nav>
 
             {/* Design thumbnail */}
             {design.driveFileId && (
@@ -1051,6 +1071,20 @@ export default function DesignDetail() {
                       </div>
                     )
                   })()}
+
+                  {/* Design verwijderen — alleen DRAFT/REVIEW en niet op Shopify */}
+                  {['DRAFT', 'REVIEW'].includes(design.status) && !alreadyOnShopify && (
+                    <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+                      <button
+                        className="btn btn-danger"
+                        style={{ fontSize: 12, padding: '5px 14px' }}
+                        onClick={deleteDesign}
+                        disabled={deleting}
+                      >
+                        {deleting ? 'Verwijderen...' : 'Design verwijderen'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

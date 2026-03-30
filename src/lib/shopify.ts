@@ -317,7 +317,7 @@ export async function buildShopifyProduct(designId: string) {
   // Pattern (from existing Shopify products):
   //   IB: [hero=largest product shot (dup)] + 5 generic sfeer + 7 size-specific with variant mapping
   //   SP: [hero=first sfeer (dup)] + 5 generic sfeer (no size-specific variants)
-  //   MC: [hero=circleart (dup)] + 6 generic sfeer + mockup-8 + 4 size-specific with variant mapping
+  //   MC: [hero=circleart] + 6 generic sfeer (lifestyle, mockup3-8) + 4 size-specific with variant mapping
   //
   // Each image entry has: src, alt, sizeKey? (for variant assignment later), isHeroDuplicate?
   // ---------------------------------------------------------------------------
@@ -339,7 +339,7 @@ export async function buildShopifyProduct(designId: string) {
     'SP-mockup4-100x50', 'SP-mockup4-100x65',
     'SP-mockup4-120x60', 'SP-mockup4-120x80',
   ]
-  const MC_GENERIC_ORDER = ['MC-circleart', 'MC-lifestyle', 'MC-mockup3', 'MC-mockup5', 'MC-mockup6', 'MC-mockup7', 'MC-mockup8']
+  const MC_GENERIC_ORDER = ['MC-lifestyle', 'MC-mockup3', 'MC-mockup5', 'MC-mockup6', 'MC-mockup7', 'MC-mockup8']
   const MC_SIZED_ORDER = ['MC-40cm', 'MC-60cm', 'MC-80cm', 'MC-100cm']
 
   const mockupMap = new Map((design.mockups ?? []).map((m) => [m.templateId, m]))
@@ -388,7 +388,7 @@ export async function buildShopifyProduct(designId: string) {
     // Hero: circleart, duplicated
     const hero = findMockup('MC-circleart')
     if (hero) images.push({ ...hero, isHeroDuplicate: true })
-    // Generic sfeer mockups (MC-circleart appears again, plus MC-mockup8 treated as generic)
+    // Generic sfeer mockups (MC-circleart is already the hero — not repeated here)
     for (const tid of MC_GENERIC_ORDER) {
       const img = findMockup(tid)
       if (img) images.push({ ...img, sizeKey: undefined }) // MC-mockup8 has sizeKey but is treated as generic
@@ -403,7 +403,7 @@ export async function buildShopifyProduct(designId: string) {
   return {
     product: {
       title: productTitle,
-      body_html: toBodyHtml(nlContent.longDescription ?? nlContent.description),
+      body_html: toBodyHtml(nlContent.description ?? nlContent.longDescription),
       vendor: 'KitchenArt',
       product_type: productTypeLabel,
       tags: tags.join(', '),

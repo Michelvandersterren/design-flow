@@ -49,6 +49,8 @@ design-flow/
 │   │   ├── upload/                   # Upload new design UI
 │   │   ├── page.tsx                  # Dashboard
 │   │   └── designs/[id]/page.tsx     # Design detail page
+│   ├── components/
+│   │   └── Sidebar.tsx        # Global sidebar navigation
 │   └── lib/
 │       ├── ai.ts             # Claude Sonnet — content generation
 │       ├── constants.ts      # Collections, sizes, pricing
@@ -216,6 +218,9 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 - ✅ MC 8 varianten: 4 diameters × 2 materialen (ADI + Forex)
 - ✅ Approve flow: Goedkeuren/Afwijzen knoppen (detail) + bulk approve (homepage)
 - ✅ Producttype filter: IB/SP/MC toggle-buttons op homepage dashboard
+- ✅ Global navigation sidebar (Sidebar.tsx) — fixed sidebar met links naar alle pagina's
+- ✅ Delete designs — DRAFT/REVIEW designs verwijderen vanuit dashboard en detail pagina
+- ✅ AI prompt hardening — "HARDE SCHRIJFREGELS" tegen em-dashes en AI-typische patronen
 
 ## Known Issues / Backlog
 
@@ -1079,5 +1084,67 @@ Audit van bestaande Shopify producten (manueel gepubliceerd) versus de `buildSho
 ### SP disk files noted but not added to config
 - `Mockup_spatwand_1.psd` (160 MB, generic without size) — new template on disk, not in config. Larger than existing templates; purpose unclear. Skipped for now to maintain consistency with existing Shopify products.
 - `kitchen splash new smart object.psb` — new PSB file, not relevant for mockup config.
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+---
+
+## Session — 2026-03-30 (vervolg): UI/UX overhaul + Shopify fixes + AI prompt improvements
+
+### UI/UX: Global navigation sidebar
+
+**`src/components/Sidebar.tsx`** — NEW FILE:
+- Fixed sidebar (200px breed) met links naar Dashboard, Upload, Stijlfamilies, Brand Voice
+- Active page highlighting via `usePathname()`
+- SVG icons per pagina
+- Uses Next.js `Link` component
+
+**`src/app/layout.tsx`**:
+- App shell: `<Sidebar />` + `<main className="app-shell">`
+- Metadata description: "print-on-demand" verwijderd (brand voice compliance)
+
+**`src/app/globals.css`**:
+- CSS variables: `--sidebar-width`, `--color-primary`, `--color-bg`, `--radius`
+- `.app-shell` class: `margin-left: var(--sidebar-width)`, `padding: 2rem`
+
+### Navigation cleanup (alle pagina's)
+
+Ad-hoc navigatie verwijderd nu sidebar beschikbaar is:
+- **Dashboard** (`src/app/page.tsx`): Stijlfamilies/Brand Voice/Upload links uit header verwijderd; `<a href>` → `<Link>`
+- **Design detail** (`src/app/designs/[id]/page.tsx`): "← Terug" knop → breadcrumbs (`Dashboard / {designCode}`)
+- **Upload** (`src/app/upload/page.tsx`): "← Terug naar dashboard" link verwijderd
+- **Brand Voice** (`src/app/brand-voice/page.tsx`): "Terug naar dashboard" button verwijderd
+- **Style Families** (`src/app/style-families/page.tsx`): "← Dashboard" back link verwijderd
+
+### Delete functionality for designs
+
+- **Dashboard**: rode "Verwijder" knop op DRAFT/REVIEW design cards (met confirm dialog)
+- **Design detail**: "Design verwijderen" knop onderaan workflow panel, alleen voor DRAFT/REVIEW designs niet op Shopify
+- Beide gebruiken bestaande `DELETE /api/designs/[id]` route (cascade delete via Prisma)
+
+### Shopify body_html fix
+
+**`src/lib/shopify.ts`** (`buildShopifyProduct()`):
+- `body_html` gewijzigd van `nlContent.longDescription ?? nlContent.description` naar `nlContent.description ?? nlContent.longDescription`
+- Root cause: `body_html` is het Shopify description veld boven de koopknop — moet de korte beschrijving zijn, niet de lange
+
+### MC beschrijving_afbeelding fix
+
+**`src/lib/shopify.ts`**:
+- `MC-circleart` verwijderd uit `MC_GENERIC_ORDER` array
+- Root cause: `MC-circleart` is het hero image (positie 1). Het stond ook in `MC_GENERIC_ORDER`, waardoor het op positie 1 EN 2 verscheen, en `MC-lifestyle` naar positie 3 werd geduwd
+- Na fix: `MC-lifestyle` land correct op positie 2, waar `beschrijving_afbeelding` naar wijst
+
+### AI prompt improvements
+
+**`src/lib/ai.ts`**:
+- "HARDE SCHRIJFREGELS" sectie toegevoegd aan de prompt, direct na de content instructies
+- Expliciete verboden: em-dashes (—), en-dashes (–) in lopende tekst, drieledige contrasten, retorische vragen, samenvattende slotzinnen, "echt"/"werkelijk"/"daadwerkelijk" als versterker, "naadloos"/"moeiteloos"/"perfect"/"optimaal"/"ultiem"
+- Variatie-instructie: "Varieer in zinslengte en aanpak per design"
+- Getest: regeneratie van NLSNVG (MC) design produceert compliant output zonder em-dashes of AI-typische patronen
+
+### Brand voice database cleanup (via PUT /api/brand-voice, niet in code)
+- 8 database velden (doNotUse, toneOfVoice, etc.): alle em-dashes als bullet points vervangen door plain dashes
+- Root cause: Claude zag em-dashes in de brand voice voorbeelden en bootste ze na, ondanks de instructie "geen em-dashes"
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors

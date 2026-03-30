@@ -125,12 +125,6 @@ export default function StyleFamiliesPage() {
       <header>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <a
-              href="/"
-              style={{ color: '#6b7280', textDecoration: 'none', fontSize: 14 }}
-            >
-              ← Dashboard
-            </a>
             <h1 style={{ margin: 0 }}>Stijlfamilies</h1>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>

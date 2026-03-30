@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 
 interface Design {
   id: string
@@ -270,15 +271,6 @@ export default function Dashboard() {
                   : `Publiceer ${stats.approved} naar Shopify`}
               </button>
             )}
-            <a href="/style-families" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
-              Stijlfamilies
-            </a>
-            <a href="/brand-voice" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
-              Brand Voice
-            </a>
-            <a href="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-              + Design uploaden
-            </a>
             <button className="btn btn-primary" onClick={syncFromNotion} disabled={syncing}>
               {syncing ? 'Syncing...' : 'Sync vanuit Notion'}
             </button>
@@ -575,9 +567,9 @@ export default function Dashboard() {
               </div>
 
               <div className="design-actions">
-                <a href={`/designs/${design.id}`} className="btn btn-primary btn-sm">
+                <Link href={`/designs/${design.id}`} className="btn btn-primary btn-sm">
                   Beheren
-                </a>
+                </Link>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={async () => {
@@ -594,6 +586,22 @@ export default function Dashboard() {
                 >
                   Sync
                 </button>
+                {['DRAFT', 'REVIEW'].includes(design.status) && (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={async () => {
+                      if (!confirm(`"${design.designName}" verwijderen?`)) return
+                      try {
+                        const res = await fetch(`/api/designs/${design.id}`, { method: 'DELETE' })
+                        const data = await res.json()
+                        if (data.success) fetchDesigns()
+                        else alert('Verwijderen mislukt')
+                      } catch { alert('Verwijderen mislukt') }
+                    }}
+                  >
+                    Verwijder
+                  </button>
+                )}
               </div>
             </div>
           )

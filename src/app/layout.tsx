@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import Sidebar from '@/components/Sidebar'
 
 export const metadata: Metadata = {
   title: 'Design Flow - Product Workflow Manager',
-  description: 'Manage your print-on-demand product workflow',
+  description: 'Intern operations-platform voor KitchenArt productlanceringen',
 }
 
 export default function RootLayout({
@@ -13,7 +14,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="nl" suppressHydrationWarning>
-      <body>{children}</body>
+      <body>
+        <Sidebar />
+        <main className="app-shell">
+          {children}
+        </main>
+      </body>
     </html>
   )
 }
