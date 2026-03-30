@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    const [designs, total, reviewCount, approvedCount, draftCount] = await Promise.all([
+    const [designs, total, reviewCount, approvedCount, draftCount, brandVoice] = await Promise.all([
       prisma.design.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
@@ -91,7 +91,16 @@ export async function GET(request: NextRequest) {
       prisma.design.count({ where: { status: 'REVIEW' } }),
       prisma.design.count({ where: { status: 'APPROVED' } }),
       prisma.design.count({ where: { status: 'DRAFT' } }),
+      prisma.brandVoice.findUnique({ where: { key: 'main' } }),
     ])
+
+    // Build per-language doNotUse map (fallback to NL)
+    const doNotUseByLang: Record<string, string | null> = {
+      nl: brandVoice?.doNotUse_nl ?? null,
+      de: brandVoice?.doNotUse_de || brandVoice?.doNotUse_nl || null,
+      en: brandVoice?.doNotUse_en || brandVoice?.doNotUse_nl || null,
+      fr: brandVoice?.doNotUse_fr || brandVoice?.doNotUse_nl || null,
+    }
 
     const reviewDesigns: ReviewDesign[] = designs.map((d) => {
       const quality = d.content.map((c) => checkContent({
@@ -101,6 +110,8 @@ export async function GET(request: NextRequest) {
         seoTitle: c.seoTitle,
         seoDescription: c.seoDescription,
         googleShoppingDescription: c.googleShoppingDescription,
+      }, {
+        doNotUseWords: doNotUseByLang[c.language] ?? null,
       }))
 
       // Overall score = average of all language scores, or 0 if no content

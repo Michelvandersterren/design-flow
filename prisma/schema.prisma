@@ -148,24 +148,54 @@ model SyncLog {
 }
 
 model BrandVoice {
-  id                   String   @id @default(cuid())
-  key                  String   @unique
-  companyInfo          String?
-  mission              String?
-  targetAudience       String?
-  partnerInfo          String?
-  materialIB           String?
-  materialMC           String?
-  materialSP           String?
-  toneOfVoice          String?
-  doUse                String?
-  doNotUse             String?
-  seoKeywordsIB        String?
-  seoKeywordsMC        String?
-  seoKeywordsSP        String?
-  exampleDescriptionIB String?
-  exampleDescriptionMC String?
-  exampleDescriptionSP String?
-  faq                  String?
-  updatedAt            DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  key                    String   @unique
+
+  // ── Universele velden (taalonafhankelijk) ──
+  companyInfo            String?
+  mission                String?
+  targetAudience         String?
+  partnerInfo            String?
+  materialIB             String?
+  materialMC             String?
+  materialSP             String?
+  toneOfVoice            String?
+  doUse                  String?
+  faq                    String?
+
+  // ── Taalspecifiek: verboden woorden ──
+  doNotUse_nl            String?
+  doNotUse_de            String?
+  doNotUse_en            String?
+  doNotUse_fr            String?
+
+  // ── Taalspecifiek: SEO keywords ──
+  seoKeywordsIB_nl       String?
+  seoKeywordsIB_de       String?
+  seoKeywordsIB_en       String?
+  seoKeywordsIB_fr       String?
+  seoKeywordsMC_nl       String?
+  seoKeywordsMC_de       String?
+  seoKeywordsMC_en       String?
+  seoKeywordsMC_fr       String?
+  seoKeywordsSP_nl       String?
+  seoKeywordsSP_de       String?
+  seoKeywordsSP_en       String?
+  seoKeywordsSP_fr       String?
+
+  // ── Taalspecifiek: voorbeeldteksten ──
+  exampleDescriptionIB_nl String?
+  exampleDescriptionIB_de String?
+  exampleDescriptionIB_en String?
+  exampleDescriptionIB_fr String?
+  exampleDescriptionMC_nl String?
+  exampleDescriptionMC_de String?
+  exampleDescriptionMC_en String?
+  exampleDescriptionMC_fr String?
+  exampleDescriptionSP_nl String?
+  exampleDescriptionSP_de String?
+  exampleDescriptionSP_en String?
+  exampleDescriptionSP_fr String?
+
+  updatedAt              DateTime @updatedAt
 }

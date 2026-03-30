@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   checkContent,
+  parseDoNotUseWords,
   FORBIDDEN_WORDS,
   AMPLIFIER_WORDS,
   type ContentInput,
@@ -346,6 +347,116 @@ describe('checkContent', () => {
     it('score should never exceed 100', () => {
       const result = checkContent(validNlContent())
       expect(result.score).toBeLessThanOrEqual(100)
+    })
+  })
+
+  describe('parseDoNotUseWords', () => {
+    it('should parse comma-separated words', () => {
+      const result = parseDoNotUseWords('goedkoop, simpel, standaard')
+      expect(result).toEqual(['goedkoop', 'simpel', 'standaard'])
+    })
+
+    it('should strip parenthetical notes', () => {
+      const result = parseDoNotUseWords('kleurrijk (te algemeen), levendig (te vaag)')
+      expect(result).toEqual(['kleurrijk', 'levendig'])
+    })
+
+    it('should lowercase all words', () => {
+      const result = parseDoNotUseWords('Goedkoop, SIMPEL, Standaard')
+      expect(result).toEqual(['goedkoop', 'simpel', 'standaard'])
+    })
+
+    it('should return empty array for null', () => {
+      expect(parseDoNotUseWords(null)).toEqual([])
+    })
+
+    it('should return empty array for undefined', () => {
+      expect(parseDoNotUseWords(undefined)).toEqual([])
+    })
+
+    it('should return empty array for empty string', () => {
+      expect(parseDoNotUseWords('')).toEqual([])
+    })
+
+    it('should return empty array for whitespace-only string', () => {
+      expect(parseDoNotUseWords('   ')).toEqual([])
+    })
+
+    it('should handle extra whitespace and empty segments', () => {
+      const result = parseDoNotUseWords('  goedkoop ,  , simpel  ')
+      expect(result).toEqual(['goedkoop', 'simpel'])
+    })
+  })
+
+  describe('checkContent with doNotUseWords option (DB-driven)', () => {
+    it('should use DB words instead of hardcoded list when provided for NL', () => {
+      const result = checkContent(
+        validNlContent({ description: 'Dit is een kleurrijk product.' }),
+        { doNotUseWords: 'kleurrijk, levendig' },
+      )
+      expect(result.issues.some((i) => i.message.includes('kleurrijk'))).toBe(true)
+    })
+
+    it('should not flag hardcoded forbidden words when DB words are provided', () => {
+      // "goedkoop" is in FORBIDDEN_WORDS but not in our custom DB list
+      const result = checkContent(
+        validNlContent({ description: 'Dit is een goedkoop product.' }),
+        { doNotUseWords: 'kleurrijk, levendig' },
+      )
+      expect(result.issues.some((i) => i.message.includes('goedkoop'))).toBe(false)
+    })
+
+    it('should apply DB forbidden words to DE content', () => {
+      const result = checkContent(
+        validDeContent({ description: 'Ein gunstiges Produkt.' }),
+        { doNotUseWords: 'gunstiges, billig' },
+      )
+      expect(result.issues.some((i) => i.message.includes('gunstiges'))).toBe(true)
+    })
+
+    it('should apply DB forbidden words to EN content', () => {
+      const enContent: ContentInput = {
+        language: 'en',
+        description: 'A cheap kitchen product.',
+        longDescription: 'This is a wonderful product for your kitchen.',
+        seoTitle: 'Marble Dream Induction Protector KitchenArt',
+        seoDescription: 'Discover the Marble Dream induction protector at KitchenArt. Protect your cooktop in style and choose from various sizes.',
+        googleShoppingDescription: 'A'.repeat(400),
+      }
+      const result = checkContent(enContent, { doNotUseWords: 'cheap, wonderful' })
+      expect(result.issues.some((i) => i.message.includes('cheap'))).toBe(true)
+      expect(result.issues.some((i) => i.message.includes('wonderful'))).toBe(true)
+    })
+
+    it('should fall back to hardcoded FORBIDDEN_WORDS for NL when doNotUseWords is null', () => {
+      const result = checkContent(
+        validNlContent({ description: 'Dit is een goedkoop product.' }),
+        { doNotUseWords: null },
+      )
+      expect(result.issues.some((i) => i.message.includes('goedkoop'))).toBe(true)
+    })
+
+    it('should fall back to hardcoded FORBIDDEN_WORDS for NL when doNotUseWords is empty', () => {
+      const result = checkContent(
+        validNlContent({ description: 'Dit is een goedkoop product.' }),
+        { doNotUseWords: '' },
+      )
+      expect(result.issues.some((i) => i.message.includes('goedkoop'))).toBe(true)
+    })
+
+    it('should not check forbidden words for DE when no DB words and no options', () => {
+      const result = checkContent(validDeContent({
+        description: 'Dit is een goedkoop product.',
+      }))
+      expect(result.issues.some((i) => i.message.includes('goedkoop'))).toBe(false)
+    })
+
+    it('should handle parenthetical notes in DB words', () => {
+      const result = checkContent(
+        validNlContent({ description: 'Een levendig ontwerp voor je keuken.' }),
+        { doNotUseWords: 'levendig (te vaag), kleurrijk (te algemeen)' },
+      )
+      expect(result.issues.some((i) => i.message.includes('levendig'))).toBe(true)
     })
   })
 })

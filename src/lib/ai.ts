@@ -24,17 +24,45 @@ interface BrandVoiceContext {
   materialSP?: string | null
   toneOfVoice?: string | null
   doUse?: string | null
-  doNotUse?: string | null
-  seoKeywordsIB?: string | null
-  seoKeywordsMC?: string | null
-  seoKeywordsSP?: string | null
-  exampleDescriptionIB?: string | null
-  exampleDescriptionMC?: string | null
-  exampleDescriptionSP?: string | null
   faq?: string | null
+
+  // Per-language fields
+  doNotUse_nl?: string | null
+  doNotUse_de?: string | null
+  doNotUse_en?: string | null
+  doNotUse_fr?: string | null
+
+  seoKeywordsIB_nl?: string | null
+  seoKeywordsIB_de?: string | null
+  seoKeywordsIB_en?: string | null
+  seoKeywordsIB_fr?: string | null
+  seoKeywordsMC_nl?: string | null
+  seoKeywordsMC_de?: string | null
+  seoKeywordsMC_en?: string | null
+  seoKeywordsMC_fr?: string | null
+  seoKeywordsSP_nl?: string | null
+  seoKeywordsSP_de?: string | null
+  seoKeywordsSP_en?: string | null
+  seoKeywordsSP_fr?: string | null
+
+  exampleDescriptionIB_nl?: string | null
+  exampleDescriptionIB_de?: string | null
+  exampleDescriptionIB_en?: string | null
+  exampleDescriptionIB_fr?: string | null
+  exampleDescriptionMC_nl?: string | null
+  exampleDescriptionMC_de?: string | null
+  exampleDescriptionMC_en?: string | null
+  exampleDescriptionMC_fr?: string | null
+  exampleDescriptionSP_nl?: string | null
+  exampleDescriptionSP_de?: string | null
+  exampleDescriptionSP_en?: string | null
+  exampleDescriptionSP_fr?: string | null
 }
 
-async function loadBrandVoice(): Promise<BrandVoiceContext | null> {
+type ProductType = 'INDUCTION' | 'CIRCLE' | 'SPLASH'
+type SupportedLang = 'nl' | 'de' | 'en' | 'fr'
+
+export async function loadBrandVoice(): Promise<BrandVoiceContext | null> {
   try {
     return await prisma.brandVoice.findUnique({ where: { key: 'main' } })
   } catch {
@@ -42,21 +70,43 @@ async function loadBrandVoice(): Promise<BrandVoiceContext | null> {
   }
 }
 
-function buildBrandVoiceSection(bv: BrandVoiceContext, productType: 'INDUCTION' | 'CIRCLE' | 'SPLASH'): string {
-  const materialMap = {
+/**
+ * Helper to pick a per-language field with NL fallback.
+ * E.g. getLocalizedField(bv, 'doNotUse', 'de') returns bv.doNotUse_de || bv.doNotUse_nl
+ */
+function getLocalizedField(bv: BrandVoiceContext, base: string, lang: SupportedLang): string | null | undefined {
+  const record = bv as unknown as Record<string, string | null | undefined>
+  const value = record[`${base}_${lang}`]
+  if (value && value.trim()) return value
+  // Fallback to NL
+  if (lang !== 'nl') {
+    const nlValue = record[`${base}_nl`]
+    if (nlValue && nlValue.trim()) return nlValue
+  }
+  return null
+}
+
+export function buildBrandVoiceSection(
+  bv: BrandVoiceContext,
+  productType: ProductType,
+  language: SupportedLang = 'nl'
+): string {
+  const materialMap: Record<ProductType, string | null | undefined> = {
     INDUCTION: bv.materialIB,
     CIRCLE: bv.materialMC,
     SPLASH: bv.materialSP,
   }
-  const seoMap = {
-    INDUCTION: bv.seoKeywordsIB,
-    CIRCLE: bv.seoKeywordsMC,
-    SPLASH: bv.seoKeywordsSP,
+
+  const seoBaseMap: Record<ProductType, string> = {
+    INDUCTION: 'seoKeywordsIB',
+    CIRCLE: 'seoKeywordsMC',
+    SPLASH: 'seoKeywordsSP',
   }
-  const exampleMap = {
-    INDUCTION: bv.exampleDescriptionIB,
-    CIRCLE: bv.exampleDescriptionMC,
-    SPLASH: bv.exampleDescriptionSP,
+
+  const exampleBaseMap: Record<ProductType, string> = {
+    INDUCTION: 'exampleDescriptionIB',
+    CIRCLE: 'exampleDescriptionMC',
+    SPLASH: 'exampleDescriptionSP',
   }
 
   const parts: string[] = ['=== BRAND VOICE DOCUMENT ===']
@@ -71,12 +121,14 @@ function buildBrandVoiceSection(bv: BrandVoiceContext, productType: 'INDUCTION' 
 
   if (bv.toneOfVoice) parts.push(`SCHRIJFSTIJL:\n${bv.toneOfVoice}`)
   if (bv.doUse) parts.push(`GEBRUIK DEZE WOORDEN/UITDRUKKINGEN:\n${bv.doUse}`)
-  if (bv.doNotUse) parts.push(`VERMIJD DEZE WOORDEN:\n${bv.doNotUse}`)
 
-  const seo = seoMap[productType]
+  const doNotUse = getLocalizedField(bv, 'doNotUse', language)
+  if (doNotUse) parts.push(`VERMIJD DEZE WOORDEN:\n${doNotUse}`)
+
+  const seo = getLocalizedField(bv, seoBaseMap[productType], language)
   if (seo) parts.push(`RELEVANTE SEO KEYWORDS:\n${seo}`)
 
-  const example = exampleMap[productType]
+  const example = getLocalizedField(bv, exampleBaseMap[productType], language)
   if (example) parts.push(`VOORBEELD PRODUCTBESCHRIJVING (ter referentie, niet kopiëren):\n${example}`)
 
   if (bv.faq) {
@@ -100,10 +152,10 @@ export async function generateContent(
   designCode: string,
   collections: string[],
   colorTags: string[],
-  productType: 'INDUCTION' | 'CIRCLE' | 'SPLASH',
+  productType: ProductType,
   driveFileId?: string | null
 ): Promise<GeneratedContent> {
-  const productNames = {
+  const productNames: Record<ProductType, string> = {
     INDUCTION: 'inductiebeschermer',
     CIRCLE: 'muurcirkel',
     SPLASH: 'spatscherm',
@@ -111,7 +163,8 @@ export async function generateContent(
 
   const productName = productNames[productType]
   const bv = await loadBrandVoice()
-  const brandVoiceSection = bv ? buildBrandVoiceSection(bv, productType) : ''
+  // Content generation is always NL (translations happen separately)
+  const brandVoiceSection = bv ? buildBrandVoiceSection(bv, productType, 'nl') : ''
 
   const textPrompt = `${brandVoiceSection}
 

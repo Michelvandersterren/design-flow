@@ -1,5 +1,6 @@
 import { DEEPL_API_KEY } from './env'
 import { prisma } from './prisma'
+import { loadBrandVoice } from './ai'
 import Anthropic from '@anthropic-ai/sdk'
 
 const anthropic = new Anthropic({
@@ -20,16 +21,47 @@ type TranslationFields = {
   googleShoppingDescription: string | null
 }
 
+type TargetLang = 'de' | 'en' | 'fr'
+
+/**
+ * Build a brand-voice-aware context block for the Claude translation prompt.
+ * Includes tone of voice, target-language doNotUse list, and SEO keywords.
+ */
+async function buildTranslationContext(targetLanguage: TargetLang): Promise<string> {
+  const bv = await loadBrandVoice()
+  if (!bv) return ''
+
+  const parts: string[] = []
+
+  if (bv.toneOfVoice) {
+    parts.push(`TONE OF VOICE (maintain this style in the translation):\n${bv.toneOfVoice}`)
+  }
+
+  // Get target-language doNotUse list (fallback to NL)
+  const langSuffix = `_${targetLanguage}` as const
+  const record = bv as unknown as Record<string, string | null | undefined>
+  const doNotUse = record[`doNotUse${langSuffix}`] || record['doNotUse_nl']
+  if (doNotUse && doNotUse.trim()) {
+    parts.push(`WORDS TO AVOID in ${LANGUAGE_NAMES[targetLanguage]}:\n${doNotUse}`)
+  }
+
+  return parts.length > 0
+    ? '\n\nBRAND VOICE CONTEXT:\n' + parts.join('\n\n') + '\n'
+    : ''
+}
+
 async function translateWithClaude(
   texts: TranslationFields,
-  targetLanguage: 'de' | 'en' | 'fr'
+  targetLanguage: TargetLang
 ): Promise<TranslationFields> {
   const langName = LANGUAGE_NAMES[targetLanguage]
+  const brandContext = await buildTranslationContext(targetLanguage)
 
   const prompt = `You are a professional translator for a Dutch kitchen accessories webshop called KitchenArt. 
 Translate the following product content from Dutch to ${langName}.
 
 Keep the commercial, warm tone. Preserve formatting. Translate naturally — do not translate word for word.
+${brandContext}
 Return ONLY a JSON object with the exact same keys as provided. Do not add any explanation.
 
 Content to translate:
@@ -115,7 +147,7 @@ async function translateWithDeepL(
 
 export async function translateContent(
   contentId: string,
-  targetLanguage: 'de' | 'en' | 'fr'
+  targetLanguage: TargetLang
 ) {
   const content = await prisma.content.findUnique({
     where: { id: contentId },

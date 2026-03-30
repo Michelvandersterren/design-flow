@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { loadBrandVoice, buildBrandVoiceSection } from '@/lib/ai'
 import Anthropic from '@anthropic-ai/sdk'
 
 const anthropic = new Anthropic({
@@ -14,16 +15,24 @@ const FIELD_LABELS: Record<string, string> = {
   googleShoppingDescription: 'Google Shopping beschrijving (300-500 tekens, feitelijk, noem materiaal, maten, gebruik)',
 }
 
+const PRODUCT_TYPE_MAP: Record<string, 'INDUCTION' | 'CIRCLE' | 'SPLASH'> = {
+  IB: 'INDUCTION',
+  MC: 'CIRCLE',
+  SP: 'SPLASH',
+}
+
 const PRODUCT_NAMES: Record<string, string> = {
   IB: 'inductiebeschermer',
   MC: 'muurcirkel',
   SP: 'spatscherm',
 }
 
+type SupportedLang = 'nl' | 'de' | 'en' | 'fr'
+
 /**
  * POST /api/ai/regenerate-field
  *
- * Regenerates a single content field using AI, keeping all other fields intact.
+ * Regenerates a single content field using AI with full brand voice context.
  *
  * Body: { designId: string, field: string, language: string }
  *   - field: one of description, longDescription, seoTitle, seoDescription, googleShoppingDescription
@@ -57,19 +66,14 @@ export async function POST(request: NextRequest) {
 
     const collections = design.collections ? JSON.parse(design.collections) : []
     const colorTags = design.colorTags ? JSON.parse(design.colorTags) : []
-    const productName = PRODUCT_NAMES[design.designType || 'IB'] || 'inductiebeschermer'
+    const designTypeKey = design.designType || 'IB'
+    const productName = PRODUCT_NAMES[designTypeKey] || 'inductiebeschermer'
+    const productType = PRODUCT_TYPE_MAP[designTypeKey] || 'INDUCTION'
 
-    // Load brand voice for forbidden words context
-    const bv = await prisma.brandVoice.findUnique({ where: { key: 'main' } })
-    const doNotUse = bv?.doNotUse || ''
-
-    // Build context from existing content so AI understands the full picture
-    const contextParts = [
-      `Design: ${design.designName} (${design.designCode})`,
-      `Product type: ${productName}`,
-      `Collecties: ${collections.join(', ') || 'geen'}`,
-      `Kleuren: ${colorTags.join(', ') || 'geen'}`,
-    ]
+    // Load full brand voice with language-specific fields
+    const bv = await loadBrandVoice()
+    const lang = (['nl', 'de', 'en', 'fr'].includes(language) ? language : 'nl') as SupportedLang
+    const brandVoiceSection = bv ? buildBrandVoiceSection(bv, productType, lang) : ''
 
     // Show the other fields as context
     const otherFields = Object.entries(FIELD_LABELS)
@@ -80,9 +84,9 @@ export async function POST(request: NextRequest) {
       })
       .filter(Boolean)
 
-    if (otherFields.length > 0) {
-      contextParts.push('\nBestaande content (ter referentie, niet herhalen):\n' + otherFields.join('\n'))
-    }
+    const otherFieldsContext = otherFields.length > 0
+      ? '\nBestaande content (ter referentie, niet herhalen):\n' + otherFields.join('\n')
+      : ''
 
     const langLabel = language === 'nl' ? 'Nederlands'
       : language === 'de' ? 'Duits'
@@ -90,16 +94,21 @@ export async function POST(request: NextRequest) {
       : language === 'fr' ? 'Frans'
       : language
 
-    const prompt = `Je schrijft productcontent voor KitchenArt, een webshop voor premium keukenproducten.
+    const prompt = `${brandVoiceSection}
 
-${contextParts.join('\n')}
+Je schrijft productcontent voor KitchenArt, een webshop voor premium keukenproducten.
+
+Design: ${design.designName} (${design.designCode})
+Product type: ${productName}
+Collecties: ${collections.join(', ') || 'geen'}
+Kleuren: ${colorTags.join(', ') || 'geen'}
+${otherFieldsContext}
 
 OPDRACHT:
 Schrijf ALLEEN een nieuwe ${FIELD_LABELS[field]} in het ${langLabel}.
 Het huidige veld bevat: "${(existingContent as unknown as Record<string, string | null>)[field] || '(leeg)'}"
 
 Schrijf een verbeterde versie. Let specifiek op:
-- Vermijd deze woorden/uitdrukkingen: ${doNotUse || 'goedkoop, simpel, standaard, gewoon, basic, normaal, super, geweldig, fantastisch, perfect, naadloos, moeiteloos, optimaal, ultiem, echt, werkelijk, daadwerkelijk'}
 - Geen em-dashes (\u2014), geen uitroeptekens, geen retorische vragen als opening
 - Geen "echt", "werkelijk", "daadwerkelijk" als versterker
 - Varieer in zinsopbouw ten opzichte van de bestaande content

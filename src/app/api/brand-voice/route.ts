@@ -23,20 +23,44 @@ const DEFAULT_BRAND_VOICE = {
     'Warm, toegankelijk en zelfverzekerd. Combineert functionaliteit met lifestyle en interieurdesign. Spreekt de klant aan als iemand die smaak heeft en van kwaliteit houdt. Niet te technisch, wel informatief. Korte, krachtige zinnen afgewisseld met sfeervolle beschrijvingen.',
   doUse:
     'stijlvol, premium, uniek, eyecatcher, dagelijks gebruik, sfeer, interieur, keuken, bescherming, design, exclusief, duurzaam, kwaliteit, verfraai, opvallend, persoonlijk, bijzonder, tijdloos',
-  doNotUse:
-    'goedkoop, budgetvriendelijk, simpel, standaard, gewoon, basic, normaal, doorsnee, kleurrijk (te algemeen), mooi (te vaag zonder context)',
-  seoKeywordsIB:
-    'inductiebeschermer, inductie beschermer, kookplaat beschermer, inductie mat, inductieplaat beschermer, anti-slip kookplaat mat, vinyl inductiebeschermer, design inductiebeschermer',
-  seoKeywordsMC:
-    'muurcirkel, wandcirkel, ronde wanddecoratie, muur decoratie keuken, keuken wanddecoratie, muurcirkel keuken, dibond muurcirkel, aluminium wanddecoratie',
-  seoKeywordsSP:
-    'spatscherm keuken, aluminium spatscherm, keuken spatscherm, achterwand keuken, kookplaat achterwand, design spatscherm, dibond spatscherm',
-  exampleDescriptionIB:
+
+  // ── Taalspecifiek: verboden woorden ──
+  doNotUse_nl: 'goedkoop, budgetvriendelijk, simpel, standaard, gewoon, basic, normaal, doorsnee, kleurrijk (te algemeen), mooi (te vaag zonder context)',
+  doNotUse_de: '',
+  doNotUse_en: '',
+  doNotUse_fr: '',
+
+  // ── Taalspecifiek: SEO keywords ──
+  seoKeywordsIB_nl: 'inductiebeschermer, inductie beschermer, kookplaat beschermer, inductie mat, inductieplaat beschermer, anti-slip kookplaat mat, vinyl inductiebeschermer, design inductiebeschermer',
+  seoKeywordsIB_de: '',
+  seoKeywordsIB_en: '',
+  seoKeywordsIB_fr: '',
+  seoKeywordsMC_nl: 'muurcirkel, wandcirkel, ronde wanddecoratie, muur decoratie keuken, keuken wanddecoratie, muurcirkel keuken, dibond muurcirkel, aluminium wanddecoratie',
+  seoKeywordsMC_de: '',
+  seoKeywordsMC_en: '',
+  seoKeywordsMC_fr: '',
+  seoKeywordsSP_nl: 'spatscherm keuken, aluminium spatscherm, keuken spatscherm, achterwand keuken, kookplaat achterwand, design spatscherm, dibond spatscherm',
+  seoKeywordsSP_de: '',
+  seoKeywordsSP_en: '',
+  seoKeywordsSP_fr: '',
+
+  // ── Taalspecifiek: voorbeeldteksten ──
+  exampleDescriptionIB_nl:
     'Geef je keuken een unieke uitstraling met deze stijlvolle inductiebeschermer van KitchenArt. Het [design naam]-design geeft je kookplaat direct een persoonlijk karakter — functioneel én decoratief.\n\nGemaakt van hoogwaardig vinyl (2mm dik) met een anti-slip achterkant, zodat de mat stevig op zijn plek blijft tijdens het koken. Dankzij het waterafstotende materiaal is hij eenvoudig schoon te houden met een vochtig doekje.\n\nBeschikbaar in diverse maten om perfect aan te sluiten op jouw inductieplaat.',
-  exampleDescriptionMC:
+  exampleDescriptionIB_de: '',
+  exampleDescriptionIB_en: '',
+  exampleDescriptionIB_fr: '',
+  exampleDescriptionMC_nl:
     'Maak van je keuken een echte eyecatcher met deze opvallende muurcirkel van KitchenArt. Het [design naam]-ontwerp brengt sfeer en karakter in elke ruimte — van moderne open keukens tot gezellige landelijke interieurs.\n\nDe muurcirkel is verkrijgbaar in verschillende materialen, zoals Dibond Premium voor optimale kleurdiepte of het elegante Dibond Butler Finish met geborsteld aluminium look. Eenvoudig op te hangen en te verplaatsen.\n\nGeprint op bestelling voor de scherpste kleuren en langdurige kwaliteit.',
-  exampleDescriptionSP:
+  exampleDescriptionMC_de: '',
+  exampleDescriptionMC_en: '',
+  exampleDescriptionMC_fr: '',
+  exampleDescriptionSP_nl:
     'Combineer bescherming en stijl met dit premium spatscherm van KitchenArt. Het [design naam]-design geeft je keuken een exclusieve uitstraling terwijl je kookwand optimaal beschermd blijft tegen spatten en vuil.\n\nGemaakt van stevig aluminium Dibond: krasvast, hittebestendig en gemakkelijk schoon te maken. Het spatscherm wordt op maat geprint voor de mooiste kleurweergave.\n\nEen unieke toevoeging aan elke keuken.',
+  exampleDescriptionSP_de: '',
+  exampleDescriptionSP_en: '',
+  exampleDescriptionSP_fr: '',
+
   faq: JSON.stringify([
     { q: 'Is de inductiebeschermer vaatwasmachinebestendig?', a: 'Nee, de inductiebeschermer mag niet in de vaatwasser. Reinig hem met een vochtig doekje.' },
     { q: 'Hoe lang gaat een inductiebeschermer mee?', a: 'Bij normaal gebruik heeft een inductiebeschermer een levensduur van circa 5 jaar.' },

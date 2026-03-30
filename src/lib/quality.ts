@@ -18,7 +18,7 @@ export interface ContentQuality {
   score: number // 0-100
 }
 
-// ── Forbidden words (from brand voice guidelines) ───────────────────────────
+// ── Default forbidden words (NL fallback when no DB words provided) ──────────
 
 export const FORBIDDEN_WORDS = [
   'goedkoop', 'budgetvriendelijk', 'simpel', 'standaard', 'gewoon', 'basic',
@@ -50,6 +50,18 @@ function findBadWords(text: string, wordList: string[], matchWholeWord: boolean)
   return found
 }
 
+/**
+ * Parse a comma-separated doNotUse string from the brand voice DB into a word list.
+ * Strips parenthetical notes like "kleurrijk (te algemeen)" → "kleurrijk".
+ */
+export function parseDoNotUseWords(doNotUse: string | null | undefined): string[] {
+  if (!doNotUse || !doNotUse.trim()) return []
+  return doNotUse
+    .split(',')
+    .map((w) => w.replace(/\s*\([^)]*\)\s*/g, '').trim().toLowerCase())
+    .filter((w) => w.length > 0)
+}
+
 // ── Quality check logic ─────────────────────────────────────────────────────
 
 export interface ContentInput {
@@ -61,7 +73,12 @@ export interface ContentInput {
   googleShoppingDescription: string | null
 }
 
-export function checkContent(content: ContentInput): ContentQuality {
+export interface CheckContentOptions {
+  /** Comma-separated forbidden words from the brand voice DB for this language. */
+  doNotUseWords?: string | null
+}
+
+export function checkContent(content: ContentInput, options?: CheckContentOptions): ContentQuality {
   const issues: QualityIssue[] = []
   let deductions = 0
 
@@ -140,6 +157,17 @@ export function checkContent(content: ContentInput): ContentQuality {
     googleShoppingDescription,
   }
 
+  // Determine which forbidden words to check:
+  // - If doNotUseWords is provided from DB, use those (works for any language)
+  // - Otherwise, use hardcoded FORBIDDEN_WORDS (NL only, backward compatible)
+  const hasDbWords = options?.doNotUseWords != null && options.doNotUseWords.trim() !== ''
+  const forbiddenWordList = hasDbWords
+    ? parseDoNotUseWords(options.doNotUseWords)
+    : (language === 'nl' ? FORBIDDEN_WORDS : [])
+
+  // Amplifier words are NL-specific concepts, always use hardcoded list
+  const amplifierWordList = language === 'nl' ? AMPLIFIER_WORDS : []
+
   // Track which words have already been reported (deduct score only once per word)
   const reportedForbidden = new Set<string>()
   const reportedAmplifiers = new Set<string>()
@@ -150,9 +178,9 @@ export function checkContent(content: ContentInput): ContentQuality {
     const text = fieldTexts[fieldKey]
     if (!text) continue
 
-    // Forbidden words (NL only)
-    if (language === 'nl') {
-      const forbidden = findBadWords(text, FORBIDDEN_WORDS, false)
+    // Forbidden words
+    if (forbiddenWordList.length > 0) {
+      const forbidden = findBadWords(text, forbiddenWordList, false)
       if (forbidden.length > 0) {
         issues.push({
           field: fieldKey,
@@ -160,7 +188,6 @@ export function checkContent(content: ContentInput): ContentQuality {
           message: `Verboden woord${forbidden.length > 1 ? 'en' : ''}: ${forbidden.map((w) => `"${w}"`).join(', ')}`,
           matchedWords: forbidden,
         })
-        // Deduct only for newly seen words
         for (const w of forbidden) {
           if (!reportedForbidden.has(w)) {
             deductions += 5
@@ -168,9 +195,11 @@ export function checkContent(content: ContentInput): ContentQuality {
           }
         }
       }
+    }
 
-      // Amplifier words (NL only)
-      const amplifiers = findBadWords(text, AMPLIFIER_WORDS, true)
+    // Amplifier words (NL only)
+    if (amplifierWordList.length > 0) {
+      const amplifiers = findBadWords(text, amplifierWordList, true)
       if (amplifiers.length > 0) {
         issues.push({
           field: fieldKey,
@@ -185,17 +214,17 @@ export function checkContent(content: ContentInput): ContentQuality {
           }
         }
       }
+    }
 
-      // Exclamation marks (NL only)
-      if (text.includes('!') && !exclamationReported) {
-        issues.push({ field: fieldKey, severity: 'warning', message: 'Uitroepteken gevonden (vermijden in brand voice)' })
-        deductions += 3
-        exclamationReported = true
-      }
+    // Exclamation marks (NL only)
+    if (language === 'nl' && text.includes('!') && !exclamationReported) {
+      issues.push({ field: fieldKey, severity: 'warning', message: 'Uitroepteken gevonden (vermijden in brand voice)' })
+      deductions += 3
+      exclamationReported = true
     }
 
     // Em-dashes (all languages)
-    if (text.includes('—') && !emDashReported) {
+    if (text.includes('\u2014') && !emDashReported) {
       issues.push({ field: fieldKey, severity: 'warning', message: 'Em-dash (\u2014) gevonden (vermijden)', matchedWords: ['\u2014'] })
       deductions += 3
       emDashReported = true

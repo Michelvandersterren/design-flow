@@ -2,7 +2,19 @@
 
 import { useEffect, useState } from 'react'
 
+const LANGUAGES = ['nl', 'de', 'en', 'fr'] as const
+type Lang = typeof LANGUAGES[number]
+
+const LANG_LABELS: Record<Lang, string> = {
+  nl: 'NL',
+  de: 'DE',
+  en: 'EN',
+  fr: 'FR',
+}
+
+// All fields in the BrandVoice model (matches Prisma schema)
 interface BrandVoice {
+  // Universal
   companyInfo: string
   mission: string
   targetAudience: string
@@ -12,34 +24,54 @@ interface BrandVoice {
   materialSP: string
   toneOfVoice: string
   doUse: string
-  doNotUse: string
-  seoKeywordsIB: string
-  seoKeywordsMC: string
-  seoKeywordsSP: string
-  exampleDescriptionIB: string
-  exampleDescriptionMC: string
-  exampleDescriptionSP: string
   faq: string
+
+  // Per-language: doNotUse
+  doNotUse_nl: string
+  doNotUse_de: string
+  doNotUse_en: string
+  doNotUse_fr: string
+
+  // Per-language: SEO keywords
+  seoKeywordsIB_nl: string
+  seoKeywordsIB_de: string
+  seoKeywordsIB_en: string
+  seoKeywordsIB_fr: string
+  seoKeywordsMC_nl: string
+  seoKeywordsMC_de: string
+  seoKeywordsMC_en: string
+  seoKeywordsMC_fr: string
+  seoKeywordsSP_nl: string
+  seoKeywordsSP_de: string
+  seoKeywordsSP_en: string
+  seoKeywordsSP_fr: string
+
+  // Per-language: example descriptions
+  exampleDescriptionIB_nl: string
+  exampleDescriptionIB_de: string
+  exampleDescriptionIB_en: string
+  exampleDescriptionIB_fr: string
+  exampleDescriptionMC_nl: string
+  exampleDescriptionMC_de: string
+  exampleDescriptionMC_en: string
+  exampleDescriptionMC_fr: string
+  exampleDescriptionSP_nl: string
+  exampleDescriptionSP_de: string
+  exampleDescriptionSP_en: string
+  exampleDescriptionSP_fr: string
 }
 
 const EMPTY: BrandVoice = {
-  companyInfo: '',
-  mission: '',
-  targetAudience: '',
-  partnerInfo: '',
-  materialIB: '',
-  materialMC: '',
-  materialSP: '',
-  toneOfVoice: '',
-  doUse: '',
-  doNotUse: '',
-  seoKeywordsIB: '',
-  seoKeywordsMC: '',
-  seoKeywordsSP: '',
-  exampleDescriptionIB: '',
-  exampleDescriptionMC: '',
-  exampleDescriptionSP: '',
-  faq: '[]',
+  companyInfo: '', mission: '', targetAudience: '', partnerInfo: '',
+  materialIB: '', materialMC: '', materialSP: '',
+  toneOfVoice: '', doUse: '', faq: '[]',
+  doNotUse_nl: '', doNotUse_de: '', doNotUse_en: '', doNotUse_fr: '',
+  seoKeywordsIB_nl: '', seoKeywordsIB_de: '', seoKeywordsIB_en: '', seoKeywordsIB_fr: '',
+  seoKeywordsMC_nl: '', seoKeywordsMC_de: '', seoKeywordsMC_en: '', seoKeywordsMC_fr: '',
+  seoKeywordsSP_nl: '', seoKeywordsSP_de: '', seoKeywordsSP_en: '', seoKeywordsSP_fr: '',
+  exampleDescriptionIB_nl: '', exampleDescriptionIB_de: '', exampleDescriptionIB_en: '', exampleDescriptionIB_fr: '',
+  exampleDescriptionMC_nl: '', exampleDescriptionMC_de: '', exampleDescriptionMC_en: '', exampleDescriptionMC_fr: '',
+  exampleDescriptionSP_nl: '', exampleDescriptionSP_de: '', exampleDescriptionSP_en: '', exampleDescriptionSP_fr: '',
 }
 
 type Section = 'bedrijf' | 'materialen' | 'tone' | 'seo' | 'voorbeelden' | 'faq'
@@ -59,6 +91,7 @@ export default function BrandVoicePage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [activeSection, setActiveSection] = useState<Section>('bedrijf')
+  const [activeLang, setActiveLang] = useState<Lang>('nl')
 
   useEffect(() => {
     fetch('/api/brand-voice')
@@ -66,25 +99,11 @@ export default function BrandVoicePage() {
       .then((json) => {
         if (json.brandVoice) {
           const bv = json.brandVoice
-          setData({
-            companyInfo: bv.companyInfo || '',
-            mission: bv.mission || '',
-            targetAudience: bv.targetAudience || '',
-            partnerInfo: bv.partnerInfo || '',
-            materialIB: bv.materialIB || '',
-            materialMC: bv.materialMC || '',
-            materialSP: bv.materialSP || '',
-            toneOfVoice: bv.toneOfVoice || '',
-            doUse: bv.doUse || '',
-            doNotUse: bv.doNotUse || '',
-            seoKeywordsIB: bv.seoKeywordsIB || '',
-            seoKeywordsMC: bv.seoKeywordsMC || '',
-            seoKeywordsSP: bv.seoKeywordsSP || '',
-            exampleDescriptionIB: bv.exampleDescriptionIB || '',
-            exampleDescriptionMC: bv.exampleDescriptionMC || '',
-            exampleDescriptionSP: bv.exampleDescriptionSP || '',
-            faq: bv.faq || '[]',
-          })
+          const loaded: Record<string, string> = {}
+          for (const key of Object.keys(EMPTY)) {
+            loaded[key] = bv[key] || (key === 'faq' ? '[]' : '')
+          }
+          setData(loaded as unknown as BrandVoice)
         }
       })
       .finally(() => setLoading(false))
@@ -154,6 +173,69 @@ export default function BrandVoicePage() {
         boxSizing: 'border-box',
       }}
     />
+  )
+
+  // Helper: build a field key with language suffix
+  const langKey = (base: string, lang: Lang): keyof BrandVoice =>
+    `${base}_${lang}` as keyof BrandVoice
+
+  // Check if a language variant has content
+  const hasContent = (base: string, lang: Lang): boolean => {
+    const val = data[langKey(base, lang)]
+    return Boolean(val && val.trim())
+  }
+
+  // Language tab bar component for sections with per-language fields
+  const langTabs = () => (
+    <div style={{
+      display: 'flex',
+      gap: 0,
+      borderBottom: '2px solid #e5e7eb',
+      marginBottom: 20,
+    }}>
+      {LANGUAGES.map((lang) => {
+        const isActive = activeLang === lang
+        // Check if this language has any content in the current section
+        let fieldsForSection: string[] = []
+        if (activeSection === 'tone') fieldsForSection = ['doNotUse']
+        else if (activeSection === 'seo') fieldsForSection = ['seoKeywordsIB', 'seoKeywordsMC', 'seoKeywordsSP']
+        else if (activeSection === 'voorbeelden') fieldsForSection = ['exampleDescriptionIB', 'exampleDescriptionMC', 'exampleDescriptionSP']
+
+        const langHasContent = fieldsForSection.some((f) => hasContent(f, lang))
+
+        return (
+          <button
+            key={lang}
+            onClick={() => setActiveLang(lang)}
+            style={{
+              padding: '8px 20px',
+              border: 'none',
+              borderBottom: isActive ? '2px solid #1d4ed8' : '2px solid transparent',
+              marginBottom: -2,
+              background: 'transparent',
+              color: isActive ? '#1d4ed8' : '#6b7280',
+              fontWeight: isActive ? 600 : 400,
+              fontSize: 14,
+              cursor: 'pointer',
+              position: 'relative',
+            }}
+          >
+            {LANG_LABELS[lang]}
+            {!langHasContent && lang !== 'nl' && (
+              <span style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: '#fbbf24',
+                marginLeft: 6,
+                verticalAlign: 'middle',
+              }} title="Nog niet ingevuld" />
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 
   return (
@@ -269,12 +351,19 @@ export default function BrandVoicePage() {
                 </p>
                 {textarea('doUse', 3, 'stijlvol, premium, uniek, eyecatcher...')}
               </div>
+
               <div className="form-group">
                 <label>Gebruik NIET (vermijden)</label>
                 <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 6px' }}>
-                  Kommagescheiden lijst van woorden die de AI moet vermijden
+                  Per taal de woorden die de AI moet vermijden. De quality checker gebruikt deze lijst ook.
                 </p>
-                {textarea('doNotUse', 2, 'goedkoop, simpel, standaard, gewoon...')}
+                {langTabs()}
+                {textarea(langKey('doNotUse', activeLang), 2,
+                  activeLang === 'nl' ? 'goedkoop, simpel, standaard, gewoon...'
+                    : activeLang === 'de' ? 'billig, einfach, standard, normal...'
+                      : activeLang === 'en' ? 'cheap, simple, standard, basic...'
+                        : 'bon march\u00e9, simple, standard, basique...'
+                )}
               </div>
             </div>
           )}
@@ -282,20 +371,37 @@ export default function BrandVoicePage() {
           {activeSection === 'seo' && (
             <div className="card">
               <h2 style={{ marginTop: 0 }}>SEO Keywords</h2>
+              <p style={{ color: '#6b7280', fontSize: 14, marginTop: -4, marginBottom: 16 }}>
+                Zoekwoorden per taal en producttype. De AI gebruikt deze bij het schrijven van SEO titels en beschrijvingen.
+              </p>
+              {langTabs()}
+
               <div className="form-group">
                 <label>Keywords — Inductiebeschermer (IB)</label>
-                <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 6px' }}>
-                  Kommagescheiden zoekwoorden voor IB-producten
-                </p>
-                {textarea('seoKeywordsIB', 3, 'inductiebeschermer, kookplaat beschermer...')}
+                {textarea(langKey('seoKeywordsIB', activeLang), 3,
+                  activeLang === 'nl' ? 'inductiebeschermer, kookplaat beschermer...'
+                    : activeLang === 'de' ? 'Induktionsschutz, Herdabdeckplatte...'
+                      : activeLang === 'en' ? 'induction protector, hob cover...'
+                        : 'protecteur induction, plaque de protection...'
+                )}
               </div>
               <div className="form-group">
                 <label>Keywords — Muurcirkel (MC)</label>
-                {textarea('seoKeywordsMC', 3, 'muurcirkel, wandcirkel...')}
+                {textarea(langKey('seoKeywordsMC', activeLang), 3,
+                  activeLang === 'nl' ? 'muurcirkel, wandcirkel...'
+                    : activeLang === 'de' ? 'Wandkreis, runde Wanddekoration...'
+                      : activeLang === 'en' ? 'wall circle, round wall art...'
+                        : 'cercle mural, d\u00e9coration murale ronde...'
+                )}
               </div>
               <div className="form-group">
                 <label>Keywords — Spatscherm (SP)</label>
-                {textarea('seoKeywordsSP', 3, 'spatscherm keuken, aluminium spatscherm...')}
+                {textarea(langKey('seoKeywordsSP', activeLang), 3,
+                  activeLang === 'nl' ? 'spatscherm keuken, aluminium spatscherm...'
+                    : activeLang === 'de' ? 'Spritzschutz K\u00fcche, Aluminium Spritzschutz...'
+                      : activeLang === 'en' ? 'kitchen splashback, aluminium splashback...'
+                        : '\u00e9cran anti-\u00e9claboussures, cr\u00e9dence cuisine...'
+                )}
               </div>
             </div>
           )}
@@ -303,20 +409,23 @@ export default function BrandVoicePage() {
           {activeSection === 'voorbeelden' && (
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Voorbeeldteksten voor AI</h2>
-              <p style={{ color: '#6b7280', fontSize: 14, marginTop: -4, marginBottom: 20 }}>
-                Deze teksten worden als referentie aan de AI meegegeven. Gebruik <code>[design naam]</code> als placeholder.
+              <p style={{ color: '#6b7280', fontSize: 14, marginTop: -4, marginBottom: 16 }}>
+                Per taal een voorbeeldtekst die de AI als referentie gebruikt. Gebruik <code>[design naam]</code> als placeholder.
+                Lege taalvarianten vallen terug op de Nederlandse tekst.
               </p>
+              {langTabs()}
+
               <div className="form-group">
                 <label>Voorbeeld productbeschrijving — Inductiebeschermer</label>
-                {textarea('exampleDescriptionIB', 8)}
+                {textarea(langKey('exampleDescriptionIB', activeLang), 8)}
               </div>
               <div className="form-group">
                 <label>Voorbeeld productbeschrijving — Muurcirkel</label>
-                {textarea('exampleDescriptionMC', 8)}
+                {textarea(langKey('exampleDescriptionMC', activeLang), 8)}
               </div>
               <div className="form-group">
                 <label>Voorbeeld productbeschrijving — Spatscherm</label>
-                {textarea('exampleDescriptionSP', 8)}
+                {textarea(langKey('exampleDescriptionSP', activeLang), 8)}
               </div>
             </div>
           )}
