@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { ReviewDesign, ReviewResponse, QualityIssue, Severity } from '@/app/api/review/route'
 
@@ -33,6 +33,38 @@ function scoreBg(score: number): string {
   if (score >= 90) return '#d1fae5'
   if (score >= 70) return '#fef3c7'
   return '#fee2e2'
+}
+
+// ── Highlight helper ────────────────────────────────────────────────────────
+
+/** Highlight matched words in text, returning an array of React nodes. */
+function highlightWords(text: string, words: string[]): ReactNode[] {
+  if (!words || words.length === 0) return [text]
+
+  // Build a single regex matching all words (case-insensitive, longest first)
+  const sorted = [...words].sort((a, b) => b.length - a.length)
+  const escaped = sorted.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const regex = new RegExp(`(${escaped.join('|')})`, 'gi')
+
+  const parts = text.split(regex)
+  return parts.map((part, i) => {
+    if (regex.test(part)) {
+      return (
+        <mark key={i} style={{
+          background: '#fde68a',
+          color: '#92400e',
+          borderRadius: 2,
+          padding: '0 2px',
+          fontWeight: 600,
+        }}>
+          {part}
+        </mark>
+      )
+    }
+    // Reset regex lastIndex after test
+    regex.lastIndex = 0
+    return part
+  })
 }
 
 // ── Main Page ───────────────────────────────────────────────────────────────
@@ -352,6 +384,7 @@ function DetailPanel({
 }) {
   const [activeLang, setActiveLang] = useState('nl')
   const [regenerating, setRegenerating] = useState(false)
+  const [regeneratingField, setRegeneratingField] = useState<ContentFieldKey | null>(null)
   const [translating, setTranslating] = useState<string | null>(null)
   const [editingField, setEditingField] = useState<ContentFieldKey | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -377,7 +410,7 @@ function DetailPanel({
     setEditValue('')
   }, [design.id, activeLang])
 
-  // ── Regenerate NL content ─────────────────────────────────────────────
+  // ── Regenerate all NL content ─────────────────────────────────────────
 
   const handleRegenerate = async () => {
     if (!confirm('NL content opnieuw genereren? Dit overschrijft de huidige Nederlandse content.')) return
@@ -422,6 +455,30 @@ function DetailPanel({
       setActionMessage({ text: e instanceof Error ? e.message : 'Generatie mislukt', type: 'error' })
     } finally {
       setRegenerating(false)
+    }
+  }
+
+  // ── Regenerate single field ───────────────────────────────────────────
+
+  const handleRegenerateField = async (field: ContentFieldKey) => {
+    setRegeneratingField(field)
+    setActionMessage(null)
+    try {
+      const res = await fetch('/api/ai/regenerate-field', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ designId: design.id, field, language: activeLang }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Hergenereren mislukt')
+      }
+      setActionMessage({ text: `${FIELD_LABELS[field]} opnieuw gegenereerd`, type: 'success' })
+      await onDataChange()
+    } catch (e) {
+      setActionMessage({ text: e instanceof Error ? e.message : 'Hergenereren mislukt', type: 'error' })
+    } finally {
+      setRegeneratingField(null)
     }
   }
 
@@ -734,10 +791,12 @@ function DetailPanel({
                 editing={editingField === 'seoTitle'}
                 editValue={editValue}
                 saving={saving}
+                regenerating={regeneratingField === 'seoTitle'}
                 onStartEdit={() => startEdit('seoTitle')}
                 onCancelEdit={cancelEdit}
                 onSaveEdit={saveEdit}
                 onEditChange={setEditValue}
+                onRegenerate={() => handleRegenerateField('seoTitle')}
               />
               <ContentField
                 label="SEO Beschrijving"
@@ -748,10 +807,12 @@ function DetailPanel({
                 editing={editingField === 'seoDescription'}
                 editValue={editValue}
                 saving={saving}
+                regenerating={regeneratingField === 'seoDescription'}
                 onStartEdit={() => startEdit('seoDescription')}
                 onCancelEdit={cancelEdit}
                 onSaveEdit={saveEdit}
                 onEditChange={setEditValue}
+                onRegenerate={() => handleRegenerateField('seoDescription')}
               />
               <ContentField
                 label="Korte beschrijving"
@@ -761,10 +822,12 @@ function DetailPanel({
                 editing={editingField === 'description'}
                 editValue={editValue}
                 saving={saving}
+                regenerating={regeneratingField === 'description'}
                 onStartEdit={() => startEdit('description')}
                 onCancelEdit={cancelEdit}
                 onSaveEdit={saveEdit}
                 onEditChange={setEditValue}
+                onRegenerate={() => handleRegenerateField('description')}
               />
               <ContentField
                 label="Lange beschrijving"
@@ -775,10 +838,12 @@ function DetailPanel({
                 editing={editingField === 'longDescription'}
                 editValue={editValue}
                 saving={saving}
+                regenerating={regeneratingField === 'longDescription'}
                 onStartEdit={() => startEdit('longDescription')}
                 onCancelEdit={cancelEdit}
                 onSaveEdit={saveEdit}
                 onEditChange={setEditValue}
+                onRegenerate={() => handleRegenerateField('longDescription')}
               />
               <ContentField
                 label="Google Shopping"
@@ -791,28 +856,13 @@ function DetailPanel({
                 editing={editingField === 'googleShoppingDescription'}
                 editValue={editValue}
                 saving={saving}
+                regenerating={regeneratingField === 'googleShoppingDescription'}
                 onStartEdit={() => startEdit('googleShoppingDescription')}
                 onCancelEdit={cancelEdit}
                 onSaveEdit={saveEdit}
                 onEditChange={setEditValue}
+                onRegenerate={() => handleRegenerateField('googleShoppingDescription')}
               />
-
-              {/* General quality issues */}
-              {quality && quality.issues.filter((i) => i.field === 'general').length > 0 && (
-                <div style={{ padding: 14, borderRadius: 8, background: '#fef3c7', border: '1px solid #fde68a' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#92400e', marginBottom: 8 }}>
-                    Algemene opmerkingen
-                  </div>
-                  {quality.issues
-                    .filter((i) => i.field === 'general')
-                    .map((issue, idx) => (
-                      <div key={idx} style={{ fontSize: 13, color: '#92400e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>{issue.severity === 'error' ? '🔴' : '🟡'}</span>
-                        {issue.message}
-                      </div>
-                    ))}
-                </div>
-              )}
             </div>
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>
@@ -838,10 +888,12 @@ function ContentField({
   editing,
   editValue,
   saving,
+  regenerating,
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
   onEditChange,
+  onRegenerate,
 }: {
   label: string
   field: ContentFieldKey
@@ -853,15 +905,22 @@ function ContentField({
   editing: boolean
   editValue: string
   saving: boolean
+  regenerating: boolean
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: () => void
   onEditChange: (value: string) => void
+  onRegenerate: () => void
 }) {
   const hasErrors = issues.some((i) => i.severity === 'error')
   const hasWarnings = issues.some((i) => i.severity === 'warning')
   const displayValue = editing ? editValue : value
   const len = displayValue?.length || 0
+
+  // Collect all matched words from issues for this field
+  const wordsToHighlight = issues
+    .flatMap((i) => i.matchedWords || [])
+    .filter((w, idx, arr) => arr.indexOf(w) === idx)
 
   return (
     <div>
@@ -916,21 +975,42 @@ function ContentField({
               </button>
             </div>
           ) : (
-            <button
-              onClick={onStartEdit}
-              style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 4,
-                border: '1px solid #e5e7eb',
-                background: '#f9fafb',
-                color: '#6b7280',
-                cursor: 'pointer',
-              }}
-              title={`${label} bewerken`}
-            >
-              Bewerken
-            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {/* Per-field regenerate button — only show when there are warnings */}
+              {hasWarnings && (
+                <button
+                  onClick={onRegenerate}
+                  disabled={regenerating}
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    border: '1px solid #f59e0b',
+                    background: '#fffbeb',
+                    color: '#92400e',
+                    cursor: 'pointer',
+                  }}
+                  title={`${label} opnieuw laten genereren door AI`}
+                >
+                  {regenerating ? 'Bezig...' : 'Herschrijven'}
+                </button>
+              )}
+              <button
+                onClick={onStartEdit}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  border: '1px solid #e5e7eb',
+                  background: '#f9fafb',
+                  color: '#6b7280',
+                  cursor: 'pointer',
+                }}
+                title={`${label} bewerken`}
+              >
+                Bewerken
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1001,7 +1081,11 @@ function ContentField({
           }}
           title="Klik om te bewerken"
         >
-          {value || 'Niet ingevuld'}
+          {value
+            ? wordsToHighlight.length > 0
+              ? highlightWords(value, wordsToHighlight)
+              : value
+            : 'Niet ingevuld'}
         </div>
       )}
 

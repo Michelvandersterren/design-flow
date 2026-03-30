@@ -9,6 +9,7 @@ export interface QualityIssue {
   field: string
   severity: Severity
   message: string
+  matchedWords?: string[] // words to highlight in the UI
 }
 
 export interface ContentQuality {
@@ -27,6 +28,27 @@ export const FORBIDDEN_WORDS = [
 ]
 
 export const AMPLIFIER_WORDS = ['echt', 'werkelijk', 'daadwerkelijk']
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+const CONTENT_FIELD_KEYS = ['description', 'longDescription', 'seoTitle', 'seoDescription', 'googleShoppingDescription'] as const
+
+type ContentFieldKey = typeof CONTENT_FIELD_KEYS[number]
+
+/** Check a single text for forbidden/amplifier words, returning per-word matches. */
+function findBadWords(text: string, wordList: string[], matchWholeWord: boolean): string[] {
+  const lower = text.toLowerCase()
+  const found: string[] = []
+  for (const word of wordList) {
+    if (matchWholeWord) {
+      const regex = new RegExp(`\\b${word}\\b`, 'i')
+      if (regex.test(lower)) found.push(word)
+    } else {
+      if (lower.includes(word.toLowerCase())) found.push(word)
+    }
+  }
+  return found
+}
 
 // ── Quality check logic ─────────────────────────────────────────────────────
 
@@ -107,50 +129,82 @@ export function checkContent(content: ContentInput): ContentQuality {
     }
   }
 
-  // Brand voice checks (only for NL content)
-  if (language === 'nl') {
-    const allText = [description, longDescription, seoDescription, googleShoppingDescription]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
+  // ── Per-field brand voice checks ──────────────────────────────────────
 
-    // Check forbidden words
-    for (const word of FORBIDDEN_WORDS) {
-      if (allText.includes(word.toLowerCase())) {
-        issues.push({ field: 'general', severity: 'warning', message: `Verboden woord gevonden: "${word}"` })
-        deductions += 5
+  // Build a map of field -> text for per-field checks
+  const fieldTexts: Record<ContentFieldKey, string | null> = {
+    description,
+    longDescription,
+    seoTitle,
+    seoDescription,
+    googleShoppingDescription,
+  }
+
+  // Track which words have already been reported (deduct score only once per word)
+  const reportedForbidden = new Set<string>()
+  const reportedAmplifiers = new Set<string>()
+  let exclamationReported = false
+  let emDashReported = false
+
+  for (const fieldKey of CONTENT_FIELD_KEYS) {
+    const text = fieldTexts[fieldKey]
+    if (!text) continue
+
+    // Forbidden words (NL only)
+    if (language === 'nl') {
+      const forbidden = findBadWords(text, FORBIDDEN_WORDS, false)
+      if (forbidden.length > 0) {
+        issues.push({
+          field: fieldKey,
+          severity: 'warning',
+          message: `Verboden woord${forbidden.length > 1 ? 'en' : ''}: ${forbidden.map((w) => `"${w}"`).join(', ')}`,
+          matchedWords: forbidden,
+        })
+        // Deduct only for newly seen words
+        for (const w of forbidden) {
+          if (!reportedForbidden.has(w)) {
+            deductions += 5
+            reportedForbidden.add(w)
+          }
+        }
       }
-    }
 
-    // Check amplifier words
-    for (const word of AMPLIFIER_WORDS) {
-      // Match as standalone word
-      const regex = new RegExp(`\\b${word}\\b`, 'i')
-      if (regex.test(allText)) {
-        issues.push({ field: 'general', severity: 'warning', message: `Versterker-woord gevonden: "${word}" (vermijden)` })
+      // Amplifier words (NL only)
+      const amplifiers = findBadWords(text, AMPLIFIER_WORDS, true)
+      if (amplifiers.length > 0) {
+        issues.push({
+          field: fieldKey,
+          severity: 'warning',
+          message: `Versterker-woord${amplifiers.length > 1 ? 'en' : ''}: ${amplifiers.map((w) => `"${w}"`).join(', ')} (vermijden)`,
+          matchedWords: amplifiers,
+        })
+        for (const w of amplifiers) {
+          if (!reportedAmplifiers.has(w)) {
+            deductions += 3
+            reportedAmplifiers.add(w)
+          }
+        }
+      }
+
+      // Exclamation marks (NL only)
+      if (text.includes('!') && !exclamationReported) {
+        issues.push({ field: fieldKey, severity: 'warning', message: 'Uitroepteken gevonden (vermijden in brand voice)' })
         deductions += 3
+        exclamationReported = true
       }
     }
 
-    // Check for exclamation marks
-    if (allText.includes('!')) {
-      issues.push({ field: 'general', severity: 'warning', message: 'Uitroepteken gevonden (vermijden in brand voice)' })
+    // Em-dashes (all languages)
+    if (text.includes('—') && !emDashReported) {
+      issues.push({ field: fieldKey, severity: 'warning', message: 'Em-dash (\u2014) gevonden (vermijden)', matchedWords: ['\u2014'] })
       deductions += 3
-    }
-
-    // Check for rhetorical questions at start
-    if (description && /^(wil|wist|heb|ben|zou|ken|heeft)\s/i.test(description.trim())) {
-      issues.push({ field: 'description', severity: 'warning', message: 'Beschrijving begint met retorische vraag (vermijden)' })
-      deductions += 3
+      emDashReported = true
     }
   }
 
-  // Check for em-dashes in all languages
-  const allText = [description, longDescription, seoDescription, googleShoppingDescription]
-    .filter(Boolean)
-    .join(' ')
-  if (allText.includes('—')) {
-    issues.push({ field: 'general', severity: 'warning', message: 'Em-dash (—) gevonden (vermijden)' })
+  // Rhetorical question at start of description (NL only)
+  if (language === 'nl' && description && /^(wil|wist|heb|ben|zou|ken|heeft)\s/i.test(description.trim())) {
+    issues.push({ field: 'description', severity: 'warning', message: 'Beschrijving begint met retorische vraag (vermijden)' })
     deductions += 3
   }
 

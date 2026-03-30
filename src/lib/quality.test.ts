@@ -264,6 +264,71 @@ describe('checkContent', () => {
     })
   })
 
+  describe('per-field reporting and matchedWords', () => {
+    it('should report forbidden word on the specific field that contains it', () => {
+      const result = checkContent(validNlContent({
+        description: 'Dit is een standaard product.',
+      }))
+      const issue = result.issues.find((i) => i.field === 'description' && i.message.includes('standaard'))
+      expect(issue).toBeDefined()
+      expect(issue?.matchedWords).toContain('standaard')
+    })
+
+    it('should report forbidden words in longDescription on that field', () => {
+      const result = checkContent(validNlContent({
+        longDescription: 'Dit is een goedkoop en simpel product.',
+      }))
+      const issue = result.issues.find((i) => i.field === 'longDescription' && i.message.includes('goedkoop'))
+      expect(issue).toBeDefined()
+      expect(issue?.matchedWords).toEqual(expect.arrayContaining(['goedkoop', 'simpel']))
+    })
+
+    it('should report amplifier words on the correct field with matchedWords', () => {
+      const result = checkContent(validNlContent({
+        seoDescription: 'Een echt mooi design voor in de keuken en dat is handig.',
+      }))
+      const issue = result.issues.find((i) => i.field === 'seoDescription' && i.message.includes('echt'))
+      expect(issue).toBeDefined()
+      expect(issue?.matchedWords).toContain('echt')
+    })
+
+    it('should report em-dash on the field where it appears', () => {
+      const result = checkContent(validNlContent({
+        longDescription: 'Een stijlvol design \u2014 mooi in elke keuken.',
+      }))
+      const issue = result.issues.find((i) => i.field === 'longDescription' && i.message.includes('Em-dash'))
+      expect(issue).toBeDefined()
+      expect(issue?.matchedWords).toContain('\u2014')
+    })
+
+    it('should report exclamation mark on the field where it appears', () => {
+      const result = checkContent(validNlContent({
+        seoTitle: 'Marble Dream Inductiebeschermer KitchenArt topper!',
+      }))
+      const issue = result.issues.find((i) => i.field === 'seoTitle' && i.message.includes('Uitroepteken'))
+      expect(issue).toBeDefined()
+    })
+
+    it('should not report forbidden words as field "general"', () => {
+      const result = checkContent(validNlContent({
+        description: 'Een goedkoop product.',
+      }))
+      expect(result.issues.some((i) => i.field === 'general')).toBe(false)
+    })
+
+    it('should deduct score only once per unique forbidden word across fields', () => {
+      const resultOne = checkContent(validNlContent({
+        description: 'Dit is een standaard product.',
+        longDescription: 'Een standaard product met mooi design dat past bij elke keuken.',
+      }))
+      const resultTwo = checkContent(validNlContent({
+        description: 'Dit is een standaard product.',
+      }))
+      // Both should produce the same deduction for "standaard" (5 points)
+      expect(resultOne.score).toBe(resultTwo.score)
+    })
+  })
+
   describe('scoring', () => {
     it('score should never go below 0', () => {
       // Stack many issues
