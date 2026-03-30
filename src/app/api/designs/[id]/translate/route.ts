@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { translateContent } from '@/lib/translation'
-import { PRODUCT_SKU_PREFIX } from '@/lib/constants'
 
 export async function POST(
   request: NextRequest,

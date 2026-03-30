@@ -14,9 +14,6 @@
  *   - FOGRA39 CMYK ICC profiel ingebed
  */
 
-import path from 'path'
-import fs from 'fs'
-import os from 'os'
 import { PDFDocument, PDFName, PDFArray, PDFDict } from 'pdf-lib'
 import sharp from 'sharp'
 import { prisma } from './prisma'
