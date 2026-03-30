@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation'
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: 'grid' },
+  { href: '/health', label: 'Health Check', icon: 'activity' },
+  { href: '/review', label: 'Content Review', icon: 'check-circle' },
+  { href: '/regenerate', label: 'Regenereren', icon: 'refresh-cw' },
   { href: '/upload', label: 'Upload', icon: 'upload' },
   { href: '/style-families', label: 'Stijlfamilies', icon: 'layers' },
   { href: '/brand-voice', label: 'Brand Voice', icon: 'mic' },
@@ -47,6 +50,27 @@ function NavIcon({ icon, size = 18 }: { icon: string; size?: number }) {
           <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
           <line x1="12" y1="19" x2="12" y2="23" />
           <line x1="8" y1="23" x2="16" y2="23" />
+        </svg>
+      )
+    case 'activity':
+      return (
+        <svg {...props}>
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+      )
+    case 'check-circle':
+      return (
+        <svg {...props}>
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+      )
+    case 'refresh-cw':
+      return (
+        <svg {...props}>
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
         </svg>
       )
     default:
