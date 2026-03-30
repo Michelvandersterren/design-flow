@@ -97,11 +97,15 @@ export default function ReviewPage() {
       params.set('limit', '20')
 
       const res = await fetch(`/api/review?${params}`)
+      if (!res.ok) {
+        console.error('Review API error:', res.status)
+        return
+      }
       const json: ReviewResponse = await res.json()
       setData(json)
 
       // Auto-select first design if none selected
-      if (!selectedId && json.designs.length > 0) {
+      if (!selectedId && json.designs?.length > 0) {
         setSelectedId(json.designs[0].id)
       }
     } catch (err) {
