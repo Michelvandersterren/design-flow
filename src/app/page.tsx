@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 
 interface Design {
@@ -16,6 +16,17 @@ interface Design {
   content: { language: string; translationStatus: string }[]
   workflowSteps: { id: string; step: string; status: string }[]
   updatedAt: string
+}
+
+interface PaginatedResponse {
+  designs: Design[]
+  total: number
+  page: number
+  limit: number
+  pages: number
+  stats: Record<string, number>
+  collections: string[]
+  styleFamilies: string[]
 }
 
 interface BulkPublishStepResult {
@@ -76,25 +87,83 @@ export default function Dashboard() {
   const [bulkPublishRunning, setBulkPublishRunning] = useState(false)
   const [bulkPublishResult, setBulkPublishResult] = useState<BulkPublishResult | null>(null)
   const [bulkApproving, setBulkApproving] = useState(false)
+
+  // Pagination & filter state
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [stats, setStats] = useState<Record<string, number>>({})
+  const [collections, setCollections] = useState<string[]>([])
+  const [styleFamilies, setStyleFamilies] = useState<string[]>([])
+
+  // Filter inputs
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterType, setFilterType] = useState('')
+  const [filterCollection, setFilterCollection] = useState('')
+  const [filterStyleFamily, setFilterStyleFamily] = useState('')
+  const [sortField, setSortField] = useState('updatedAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Debounce search input
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchTerm)
+      setPage(1)
+    }, 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [searchTerm])
 
   const fetchDesigns = useCallback(async () => {
     try {
-      const res = await fetch('/api/designs')
-      const data = await res.json()
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('limit', '50')
+      params.set('sort', sortField)
+      params.set('dir', sortDir)
+      if (debouncedSearch) params.set('search', debouncedSearch)
+      if (filterStatus) params.set('status', filterStatus)
+      if (filterCollection) params.set('collection', filterCollection)
+      if (filterStyleFamily) params.set('styleFamily', filterStyleFamily)
+
+      const res = await fetch(`/api/designs?${params}`)
+      const data: PaginatedResponse = await res.json()
       setDesigns(data.designs || [])
+      setTotal(data.total)
+      setTotalPages(data.pages)
+      setStats(data.stats || {})
+      if (data.collections) setCollections(data.collections)
+      if (data.styleFamilies) setStyleFamilies(data.styleFamilies)
     } catch (err) {
       console.error('Error fetching designs:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, debouncedSearch, filterStatus, filterCollection, filterStyleFamily, sortField, sortDir])
 
   useEffect(() => {
     fetchDesigns()
   }, [fetchDesigns])
+
+  // Reset page on filter change
+  const handleFilterChange = (setter: (v: string) => void, value: string) => {
+    setter(value)
+    setPage(1)
+  }
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir(field === 'designName' ? 'asc' : 'desc')
+    }
+    setPage(1)
+  }
 
   const syncFromNotion = async () => {
     setSyncing(true)
@@ -117,12 +186,12 @@ export default function Dashboard() {
   }
 
   const runBulkWorkflow = async () => {
-    const draftCount = designs.filter((d) => d.status === 'DRAFT').length
+    const draftCount = stats.DRAFT || 0
     if (draftCount === 0) {
       alert('Geen DRAFT designs om te verwerken.')
       return
     }
-    if (!confirm(`Bulk workflow starten voor ${draftCount} DRAFT designs?\n\nDit genereert AI content (NL), vertaalt naar DE + EN en maakt varianten aan.`)) return
+    if (!confirm(`Bulk workflow starten voor ${draftCount} DRAFT designs?\n\nDit genereert AI content (NL), vertaalt naar DE + EN + FR en maakt varianten aan.`)) return
 
     setBulkRunning(true)
     setBulkResult(null)
@@ -143,7 +212,7 @@ export default function Dashboard() {
   }
 
   const runBulkPublish = async () => {
-    const publishableCount = designs.filter((d) => d.status === 'APPROVED').length
+    const publishableCount = stats.APPROVED || 0
     if (publishableCount === 0) {
       alert('Geen APPROVED designs om te publiceren.')
       return
@@ -169,14 +238,19 @@ export default function Dashboard() {
   }
 
   const runBulkApprove = async () => {
-    const reviewDesigns = designs.filter((d) => d.status === 'REVIEW')
-    if (reviewDesigns.length === 0) return
-    if (!confirm(`${reviewDesigns.length} REVIEW designs goedkeuren?`)) return
+    const reviewCount = stats.REVIEW || 0
+    if (reviewCount === 0) return
+    if (!confirm(`${reviewCount} REVIEW designs goedkeuren?`)) return
 
     setBulkApproving(true)
     try {
+      // Fetch all REVIEW designs (unfiltered) for the bulk action
+      const res = await fetch('/api/designs?status=REVIEW&limit=100')
+      const data = await res.json()
+      const reviewDesigns = data.designs || []
+
       await Promise.all(
-        reviewDesigns.map((d) =>
+        reviewDesigns.map((d: Design) =>
           fetch(`/api/designs/${d.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -192,34 +266,24 @@ export default function Dashboard() {
     }
   }
 
-  const stats = {
-    total: designs.length,
-    draft: designs.filter((d) => d.status === 'DRAFT').length,
-    review: designs.filter((d) => d.status === 'REVIEW').length,
-    approved: designs.filter((d) => d.status === 'APPROVED').length,
-    live: designs.filter((d) => d.status === 'LIVE').length,
-  }
+  // Client-side type filter (product type is not a DB column for filtering)
+  const filteredDesigns = filterType
+    ? designs.filter((d) =>
+        (filterType === 'IB' && d.inductionFriendly) ||
+        (filterType === 'SP' && d.splashFriendly) ||
+        (filterType === 'MC' && d.circleFriendly)
+      )
+    : designs
 
-  const filteredDesigns = designs.filter((d) => {
-    const matchSearch =
-      !searchTerm ||
-      d.designName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.designCode.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchStatus = !filterStatus || d.status === filterStatus
-    const matchType =
-      !filterType ||
-      (filterType === 'IB' && d.inductionFriendly) ||
-      (filterType === 'SP' && d.splashFriendly) ||
-      (filterType === 'MC' && d.circleFriendly)
-    return matchSearch && matchStatus && matchType
-  })
+  const totalStat = Object.values(stats).reduce((a, b) => a + b, 0)
 
   const getWorkflowBadges = (design: Design) => {
     const hasNl = design.content.some((c) => c.language === 'nl')
     const hasDe = design.content.some((c) => c.language === 'de')
     const hasEn = design.content.some((c) => c.language === 'en')
+    const hasFr = design.content.some((c) => c.language === 'fr')
     const hasVariants = design.variants.length > 0
-    return { hasNl, hasDe, hasEn, hasVariants }
+    return { hasNl, hasDe, hasEn, hasFr, hasVariants }
   }
 
   if (loading) {
@@ -237,17 +301,17 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ margin: 0 }}>Design Flow</h1>
           <div style={{ display: 'flex', gap: 10 }}>
-            {stats.draft > 0 && (
+            {(stats.DRAFT || 0) > 0 && (
               <button
                 className="btn btn-success"
                 onClick={runBulkWorkflow}
                 disabled={bulkRunning}
-                title="Genereer content, vertaal naar DE + EN en maak varianten voor alle DRAFT designs"
+                title="Genereer content, vertaal naar DE + EN + FR en maak varianten voor alle DRAFT designs"
               >
-                {bulkRunning ? 'Bezig...' : `Verwerk ${stats.draft} DRAFT designs`}
+                {bulkRunning ? 'Bezig...' : `Verwerk ${stats.DRAFT} DRAFT designs`}
               </button>
             )}
-            {stats.review > 0 && (
+            {(stats.REVIEW || 0) > 0 && (
               <button
                 className="btn btn-success"
                 onClick={runBulkApprove}
@@ -255,10 +319,10 @@ export default function Dashboard() {
                 title="Keur alle REVIEW designs goed"
                 style={{ background: '#2563eb', borderColor: '#2563eb' }}
               >
-                {bulkApproving ? 'Bezig...' : `Keur ${stats.review} REVIEW goed`}
+                {bulkApproving ? 'Bezig...' : `Keur ${stats.REVIEW} REVIEW goed`}
               </button>
             )}
-            {stats.approved > 0 && (
+            {(stats.APPROVED || 0) > 0 && (
               <button
                 className="btn btn-success"
                 onClick={runBulkPublish}
@@ -268,7 +332,7 @@ export default function Dashboard() {
               >
                 {bulkPublishRunning
                   ? 'Publiceren...'
-                  : `Publiceer ${stats.approved} naar Shopify`}
+                  : `Publiceer ${stats.APPROVED} naar Shopify`}
               </button>
             )}
             <button className="btn btn-primary" onClick={syncFromNotion} disabled={syncing}>
@@ -407,16 +471,16 @@ export default function Dashboard() {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="stats">
           {[
-            { label: 'Totaal', value: stats.total, filter: '' },
-            { label: 'Draft', value: stats.draft, filter: 'DRAFT' },
-            { label: 'Review', value: stats.review, filter: 'REVIEW' },
-            { label: 'Approved', value: stats.approved, filter: 'APPROVED' },
-            { label: 'Live', value: stats.live, filter: 'LIVE' },
+            { label: 'Totaal', value: totalStat, filter: '' },
+            { label: 'Draft', value: stats.DRAFT || 0, filter: 'DRAFT' },
+            { label: 'Review', value: stats.REVIEW || 0, filter: 'REVIEW' },
+            { label: 'Approved', value: stats.APPROVED || 0, filter: 'APPROVED' },
+            { label: 'Live', value: stats.LIVE || 0, filter: 'LIVE' },
           ].map(({ label, value, filter }) => (
             <div
               key={label}
               className="stat"
-              onClick={() => setFilterStatus(filterStatus === filter ? '' : filter)}
+              onClick={() => handleFilterChange(setFilterStatus, filterStatus === filter ? '' : filter)}
               style={{ cursor: 'pointer', opacity: filterStatus && filterStatus !== filter ? 0.4 : 1 }}
             >
               <div className="stat-value">{value}</div>
@@ -428,8 +492,8 @@ export default function Dashboard() {
 
       {/* Zoek + filter */}
       <div className="card" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ flex: 1, marginBottom: 0, minWidth: 200 }}>
             <input
               type="text"
               placeholder="Zoek op naam of code..."
@@ -463,7 +527,7 @@ export default function Dashboard() {
           </div>
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            onChange={(e) => handleFilterChange(setFilterStatus, e.target.value)}
             style={{ padding: '10px', borderRadius: 6, border: '1px solid #e5e7eb' }}
           >
             <option value="">Alle statussen</option>
@@ -471,14 +535,88 @@ export default function Dashboard() {
             <option value="REVIEW">Review</option>
             <option value="APPROVED">Approved</option>
             <option value="LIVE">Live</option>
+            <option value="ARCHIVED">Archived</option>
+          </select>
+          {collections.length > 0 && (
+            <select
+              value={filterCollection}
+              onChange={(e) => handleFilterChange(setFilterCollection, e.target.value)}
+              style={{ padding: '10px', borderRadius: 6, border: '1px solid #e5e7eb' }}
+            >
+              <option value="">Alle collecties</option>
+              {collections.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+          {styleFamilies.length > 0 && (
+            <select
+              value={filterStyleFamily}
+              onChange={(e) => handleFilterChange(setFilterStyleFamily, e.target.value)}
+              style={{ padding: '10px', borderRadius: 6, border: '1px solid #e5e7eb' }}
+            >
+              <option value="">Alle stijlfamilies</option>
+              {styleFamilies.map((sf) => (
+                <option key={sf} value={sf}>{sf}</option>
+              ))}
+            </select>
+          )}
+          <select
+            value={`${sortField}-${sortDir}`}
+            onChange={(e) => {
+              const [f, d] = e.target.value.split('-')
+              setSortField(f)
+              setSortDir(d as 'asc' | 'desc')
+              setPage(1)
+            }}
+            style={{ padding: '10px', borderRadius: 6, border: '1px solid #e5e7eb' }}
+          >
+            <option value="updatedAt-desc">Laatst bijgewerkt</option>
+            <option value="createdAt-desc">Nieuwste eerst</option>
+            <option value="createdAt-asc">Oudste eerst</option>
+            <option value="designName-asc">Naam A-Z</option>
+            <option value="designName-desc">Naam Z-A</option>
+            <option value="designCode-asc">Code A-Z</option>
           </select>
         </div>
+      </div>
+
+      {/* Resultaat info */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '0 4px' }}>
+        <span style={{ fontSize: 13, color: '#6b7280' }}>
+          {total} designs gevonden
+          {totalPages > 1 && ` — pagina ${page} van ${totalPages}`}
+        </span>
+        {(filterStatus || filterCollection || filterStyleFamily || filterType || debouncedSearch) && (
+          <button
+            onClick={() => {
+              setSearchTerm('')
+              setDebouncedSearch('')
+              setFilterStatus('')
+              setFilterType('')
+              setFilterCollection('')
+              setFilterStyleFamily('')
+              setPage(1)
+            }}
+            style={{
+              fontSize: 12,
+              padding: '4px 10px',
+              borderRadius: 4,
+              border: '1px solid #e5e7eb',
+              background: '#fff',
+              color: '#6b7280',
+              cursor: 'pointer',
+            }}
+          >
+            Filters wissen
+          </button>
+        )}
       </div>
 
       {/* Design grid */}
       <div className="design-grid">
         {filteredDesigns.map((design) => {
-          const { hasNl, hasDe, hasEn, hasVariants } = getWorkflowBadges(design)
+          const { hasNl, hasDe, hasEn, hasFr, hasVariants } = getWorkflowBadges(design)
           return (
             <div key={design.id} className="design-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
@@ -500,6 +638,26 @@ export default function Dashboard() {
                   {design.status}
                 </span>
               </div>
+
+              {/* Collection tag */}
+              {design.collections && (
+                <div style={{ marginBottom: 6 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      borderRadius: 3,
+                      background: '#f5f3ff',
+                      color: '#6d28d9',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleFilterChange(setFilterCollection, design.collections || '')}
+                    title={`Filter op ${design.collections}`}
+                  >
+                    {design.collections}
+                  </span>
+                </div>
+              )}
 
               {/* Product types */}
               <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -551,6 +709,18 @@ export default function Dashboard() {
                   }}
                 >
                   {hasEn ? '✓' : '○'} EN
+                </span>
+                <span
+                  title="FR vertaling"
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 7px',
+                    borderRadius: 3,
+                    background: hasFr ? '#dcfce7' : '#f3f4f6',
+                    color: hasFr ? '#166534' : '#9ca3af',
+                  }}
+                >
+                  {hasFr ? '✓' : '○'} FR
                 </span>
                 <span
                   title={`${design.variants.length} varianten`}
@@ -611,12 +781,79 @@ export default function Dashboard() {
       {filteredDesigns.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: 40 }}>
           <p style={{ color: '#666', marginBottom: 20 }}>
-            {designs.length === 0
+            {total === 0 && !debouncedSearch && !filterStatus && !filterCollection && !filterStyleFamily
               ? 'Geen designs gevonden. Klik op "Sync vanuit Notion" om je library te importeren.'
               : 'Geen designs gevonden met deze filters.'}
           </p>
         </div>
       )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="pagination">
+          <button
+            className="pagination-btn"
+            disabled={page <= 1}
+            onClick={() => setPage(1)}
+            title="Eerste pagina"
+          >
+            ««
+          </button>
+          <button
+            className="pagination-btn"
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+          >
+            «
+          </button>
+          {generatePageNumbers(page, totalPages).map((p, i) =>
+            p === null ? (
+              <span key={`ellipsis-${i}`} className="pagination-ellipsis">...</span>
+            ) : (
+              <button
+                key={p}
+                className={`pagination-btn ${page === p ? 'pagination-btn-active' : ''}`}
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </button>
+            )
+          )}
+          <button
+            className="pagination-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage(page + 1)}
+          >
+            »
+          </button>
+          <button
+            className="pagination-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage(totalPages)}
+            title="Laatste pagina"
+          >
+            »»
+          </button>
+        </div>
+      )}
     </div>
   )
+}
+
+function generatePageNumbers(current: number, total: number): (number | null)[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+
+  const pages: (number | null)[] = [1]
+
+  if (current > 3) pages.push(null)
+
+  const start = Math.max(2, current - 1)
+  const end = Math.min(total - 1, current + 1)
+
+  for (let i = start; i <= end; i++) pages.push(i)
+
+  if (current < total - 2) pages.push(null)
+
+  pages.push(total)
+  return pages
 }
