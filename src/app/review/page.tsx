@@ -9,6 +9,7 @@ import type { ReviewDesign, ReviewResponse, QualityIssue, Severity } from '@/app
 const LANG_FLAGS: Record<string, string> = { nl: '🇳🇱', de: '🇩🇪', en: '🇬🇧', fr: '🇫🇷' }
 const LANG_LABELS: Record<string, string> = { nl: 'Nederlands', de: 'Duits', en: 'Engels', fr: 'Frans' }
 const LANG_ORDER = ['nl', 'de', 'en', 'fr']
+const TRANSLATABLE_LANGS = ['de', 'en', 'fr']
 
 const FIELD_LABELS: Record<string, string> = {
   seoTitle: 'SEO Titel',
@@ -18,6 +19,9 @@ const FIELD_LABELS: Record<string, string> = {
   googleShoppingDescription: 'Google Shopping',
   general: 'Algemeen',
 }
+
+const CONTENT_FIELDS = ['seoTitle', 'seoDescription', 'description', 'longDescription', 'googleShoppingDescription'] as const
+type ContentFieldKey = typeof CONTENT_FIELDS[number]
 
 function scoreColor(score: number): string {
   if (score >= 90) return '#16a34a'
@@ -319,6 +323,7 @@ export default function ReviewPage() {
             approving={approving === selected.id}
             onApprove={() => handleStatusChange(selected.id, 'APPROVED')}
             onReject={() => handleStatusChange(selected.id, 'DRAFT')}
+            onDataChange={fetchData}
           />
         ) : (
           <div className="card" style={{ textAlign: 'center', color: '#9ca3af', padding: 60 }}>
@@ -337,21 +342,177 @@ function DetailPanel({
   approving,
   onApprove,
   onReject,
+  onDataChange,
 }: {
   design: ReviewDesign
   approving: boolean
   onApprove: () => void
   onReject: () => void
+  onDataChange: () => Promise<void>
 }) {
   const [activeLang, setActiveLang] = useState('nl')
+  const [regenerating, setRegenerating] = useState(false)
+  const [translating, setTranslating] = useState<string | null>(null)
+  const [editingField, setEditingField] = useState<ContentFieldKey | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
   const content = design.content.find((c) => c.language === activeLang)
   const quality = design.quality.find((q) => q.language === activeLang)
   const sortedContent = [...design.content].sort(
     (a, b) => LANG_ORDER.indexOf(a.language) - LANG_ORDER.indexOf(b.language)
   )
 
+  // Clear action message after 4 seconds
+  useEffect(() => {
+    if (!actionMessage) return
+    const t = setTimeout(() => setActionMessage(null), 4000)
+    return () => clearTimeout(t)
+  }, [actionMessage])
+
+  // Reset edit state when design or language changes
+  useEffect(() => {
+    setEditingField(null)
+    setEditValue('')
+  }, [design.id, activeLang])
+
+  // ── Regenerate NL content ─────────────────────────────────────────────
+
+  const handleRegenerate = async () => {
+    if (!confirm('NL content opnieuw genereren? Dit overschrijft de huidige Nederlandse content.')) return
+    setRegenerating(true)
+    setActionMessage(null)
+    try {
+      const productType = design.designType === 'IB' ? 'INDUCTION'
+        : design.designType === 'MC' ? 'CIRCLE'
+        : design.designType === 'SP' ? 'SPLASH'
+        : 'INDUCTION'
+
+      const res = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ designId: design.id, productType }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Content generatie mislukt')
+      }
+
+      // Auto-translate to existing languages
+      const existingLangs = design.content
+        .map((c) => c.language)
+        .filter((l) => TRANSLATABLE_LANGS.includes(l))
+
+      for (const lang of existingLangs) {
+        await fetch(`/api/designs/${design.id}/translate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: lang }),
+        })
+      }
+
+      setActionMessage({
+        text: `Content gegenereerd${existingLangs.length > 0 ? ` en vertaald naar ${existingLangs.map((l) => LANG_LABELS[l]).join(', ')}` : ''}`,
+        type: 'success',
+      })
+      setActiveLang('nl')
+      await onDataChange()
+    } catch (e) {
+      setActionMessage({ text: e instanceof Error ? e.message : 'Generatie mislukt', type: 'error' })
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  // ── Retranslate single language ───────────────────────────────────────
+
+  const handleRetranslate = async (lang: string) => {
+    setTranslating(lang)
+    setActionMessage(null)
+    try {
+      const res = await fetch(`/api/designs/${design.id}/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: lang }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Vertaling mislukt')
+      }
+      setActionMessage({ text: `${LANG_LABELS[lang]} vertaling bijgewerkt`, type: 'success' })
+      await onDataChange()
+    } catch (e) {
+      setActionMessage({ text: e instanceof Error ? e.message : 'Vertaling mislukt', type: 'error' })
+    } finally {
+      setTranslating(null)
+    }
+  }
+
+  // ── Inline edit ───────────────────────────────────────────────────────
+
+  const startEdit = (field: ContentFieldKey) => {
+    if (!content) return
+    setEditingField(field)
+    setEditValue((content as Record<string, string | null>)[field] || '')
+  }
+
+  const cancelEdit = () => {
+    setEditingField(null)
+    setEditValue('')
+  }
+
+  const saveEdit = async () => {
+    if (!editingField) return
+    setSaving(true)
+    setActionMessage(null)
+    try {
+      const res = await fetch(`/api/designs/${design.id}/content`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: activeLang, [editingField]: editValue }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Opslaan mislukt')
+      }
+      const savedField = editingField
+      setEditingField(null)
+      setEditValue('')
+      setActionMessage({ text: `${FIELD_LABELS[savedField] || savedField} opgeslagen`, type: 'success' })
+      await onDataChange()
+    } catch (e) {
+      setActionMessage({ text: e instanceof Error ? e.message : 'Opslaan mislukt', type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Action message bar */}
+      {actionMessage && (
+        <div style={{
+          padding: '10px 16px',
+          borderRadius: 8,
+          background: actionMessage.type === 'success' ? '#d1fae5' : '#fee2e2',
+          color: actionMessage.type === 'success' ? '#065f46' : '#991b1b',
+          fontSize: 13,
+          fontWeight: 500,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          {actionMessage.text}
+          <button
+            onClick={() => setActionMessage(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'inherit', padding: '0 4px' }}
+          >
+            x
+          </button>
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="card" style={{
         display: 'flex',
@@ -383,13 +544,23 @@ function DetailPanel({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Regenerate button */}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            style={{ fontSize: 13 }}
+            title="NL content opnieuw genereren + vertalingen bijwerken"
+          >
+            {regenerating ? 'Genereren...' : 'Hergenereren'}
+          </button>
           <Link
             href={`/designs/${design.id}`}
             className="btn btn-secondary btn-sm"
             style={{ textDecoration: 'none', fontSize: 13 }}
           >
-            Bewerken
+            Detailpagina
           </Link>
           {design.status === 'REVIEW' && (
             <>
@@ -497,78 +668,133 @@ function DetailPanel({
 
         {/* Right: Content fields */}
         <div className="card" style={{ padding: 20 }}>
-          {/* Language tabs */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid #e5e7eb', paddingBottom: 12 }}>
-            {sortedContent.map((c) => {
-              const q = design.quality.find((q) => q.language === c.language)
-              const isActive = c.language === activeLang
-              return (
-                <button
-                  key={c.language}
-                  onClick={() => setActiveLang(c.language)}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: isActive ? '#2563eb' : 'transparent',
-                    color: isActive ? '#fff' : '#374151',
-                    fontWeight: isActive ? 600 : 400,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  {LANG_FLAGS[c.language]} {LANG_LABELS[c.language] || c.language}
-                  {q && q.issues.length > 0 && (
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      padding: '1px 5px',
-                      borderRadius: 10,
-                      background: isActive ? 'rgba(255,255,255,0.3)' : scoreColor(q.score) + '22',
-                      color: isActive ? '#fff' : scoreColor(q.score),
-                    }}>
-                      {q.issues.length}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
+          {/* Language tabs + retranslate button */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid #e5e7eb', paddingBottom: 12, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+              {sortedContent.map((c) => {
+                const q = design.quality.find((qItem) => qItem.language === c.language)
+                const isActive = c.language === activeLang
+                return (
+                  <button
+                    key={c.language}
+                    onClick={() => setActiveLang(c.language)}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: isActive ? '#2563eb' : 'transparent',
+                      color: isActive ? '#fff' : '#374151',
+                      fontWeight: isActive ? 600 : 400,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    {LANG_FLAGS[c.language]} {LANG_LABELS[c.language] || c.language}
+                    {q && q.issues.length > 0 && (
+                      <span style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 10,
+                        background: isActive ? 'rgba(255,255,255,0.3)' : scoreColor(q.score) + '22',
+                        color: isActive ? '#fff' : scoreColor(q.score),
+                      }}>
+                        {q.issues.length}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            {/* Retranslate button for non-NL languages */}
+            {TRANSLATABLE_LANGS.includes(activeLang) && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleRetranslate(activeLang)}
+                disabled={translating === activeLang}
+                style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                title={`${LANG_LABELS[activeLang]} opnieuw vertalen vanuit NL`}
+              >
+                {translating === activeLang ? 'Vertalen...' : 'Hervertalen'}
+              </button>
+            )}
           </div>
 
           {content ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <ContentField
                 label="SEO Titel"
+                field="seoTitle"
                 value={content.seoTitle}
                 maxLength={60}
                 issues={quality?.issues.filter((i) => i.field === 'seoTitle') || []}
+                editing={editingField === 'seoTitle'}
+                editValue={editValue}
+                saving={saving}
+                onStartEdit={() => startEdit('seoTitle')}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onEditChange={setEditValue}
               />
               <ContentField
                 label="SEO Beschrijving"
+                field="seoDescription"
                 value={content.seoDescription}
                 maxLength={160}
                 issues={quality?.issues.filter((i) => i.field === 'seoDescription') || []}
+                editing={editingField === 'seoDescription'}
+                editValue={editValue}
+                saving={saving}
+                onStartEdit={() => startEdit('seoDescription')}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onEditChange={setEditValue}
               />
               <ContentField
                 label="Korte beschrijving"
+                field="description"
                 value={content.description}
                 issues={quality?.issues.filter((i) => i.field === 'description') || []}
+                editing={editingField === 'description'}
+                editValue={editValue}
+                saving={saving}
+                onStartEdit={() => startEdit('description')}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onEditChange={setEditValue}
               />
               <ContentField
                 label="Lange beschrijving"
+                field="longDescription"
                 value={content.longDescription}
                 multiline
                 issues={quality?.issues.filter((i) => i.field === 'longDescription') || []}
+                editing={editingField === 'longDescription'}
+                editValue={editValue}
+                saving={saving}
+                onStartEdit={() => startEdit('longDescription')}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onEditChange={setEditValue}
               />
               <ContentField
                 label="Google Shopping"
+                field="googleShoppingDescription"
                 value={content.googleShoppingDescription}
                 minLength={300}
                 maxLength={500}
+                multiline
                 issues={quality?.issues.filter((i) => i.field === 'googleShoppingDescription') || []}
+                editing={editingField === 'googleShoppingDescription'}
+                editValue={editValue}
+                saving={saving}
+                onStartEdit={() => startEdit('googleShoppingDescription')}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onEditChange={setEditValue}
               />
 
               {/* General quality issues */}
@@ -603,22 +829,39 @@ function DetailPanel({
 
 function ContentField({
   label,
+  field,
   value,
   maxLength,
   minLength,
   multiline,
   issues,
+  editing,
+  editValue,
+  saving,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onEditChange,
 }: {
   label: string
+  field: ContentFieldKey
   value: string | null
   maxLength?: number
   minLength?: number
   multiline?: boolean
   issues: QualityIssue[]
+  editing: boolean
+  editValue: string
+  saving: boolean
+  onStartEdit: () => void
+  onCancelEdit: () => void
+  onSaveEdit: () => void
+  onEditChange: (value: string) => void
 }) {
   const hasErrors = issues.some((i) => i.severity === 'error')
   const hasWarnings = issues.some((i) => i.severity === 'warning')
-  const len = value?.length || 0
+  const displayValue = editing ? editValue : value
+  const len = displayValue?.length || 0
 
   return (
     <div>
@@ -629,35 +872,141 @@ function ContentField({
           {!hasErrors && hasWarnings && <span style={{ fontSize: 12 }}>🟡</span>}
           {!hasErrors && !hasWarnings && value && <span style={{ fontSize: 12 }}>🟢</span>}
         </label>
-        {(maxLength || minLength) && value && (
-          <span style={{
-            fontSize: 11,
-            color: (maxLength && len > maxLength) || (minLength && len < minLength) ? '#dc2626' : '#9ca3af',
-            fontFamily: 'monospace',
-          }}>
-            {len}{maxLength ? `/${maxLength}` : ''} tekens
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {(maxLength || minLength) && displayValue && (
+            <span style={{
+              fontSize: 11,
+              color: (maxLength && len > maxLength) || (minLength && len < minLength) ? '#dc2626' : '#9ca3af',
+              fontFamily: 'monospace',
+            }}>
+              {len}{maxLength ? `/${maxLength}` : ''} tekens
+            </span>
+          )}
+          {editing ? (
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                onClick={onCancelEdit}
+                disabled={saving}
+                style={{
+                  fontSize: 12,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  border: '1px solid #d1d5db',
+                  background: '#fff',
+                  color: '#374151',
+                  cursor: 'pointer',
+                }}
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={onSaveEdit}
+                disabled={saving}
+                style={{
+                  fontSize: 12,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  border: '1px solid #2563eb',
+                  background: '#2563eb',
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {saving ? 'Opslaan...' : 'Opslaan'}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onStartEdit}
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                border: '1px solid #e5e7eb',
+                background: '#f9fafb',
+                color: '#6b7280',
+                cursor: 'pointer',
+              }}
+              title={`${label} bewerken`}
+            >
+              Bewerken
+            </button>
+          )}
+        </div>
       </div>
 
-      <div style={{
-        padding: '10px 14px',
-        borderRadius: 6,
-        border: `1px solid ${hasErrors ? '#fca5a5' : hasWarnings ? '#fde68a' : '#e5e7eb'}`,
-        background: hasErrors ? '#fef2f2' : hasWarnings ? '#fffbeb' : '#f9fafb',
-        fontSize: 14,
-        color: value ? '#111' : '#9ca3af',
-        lineHeight: 1.6,
-        whiteSpace: multiline ? 'pre-wrap' : 'normal',
-        minHeight: multiline ? 80 : undefined,
-        maxHeight: multiline ? 200 : undefined,
-        overflowY: multiline ? 'auto' : undefined,
-      }}>
-        {value || 'Niet ingevuld'}
-      </div>
+      {editing ? (
+        multiline ? (
+          <textarea
+            value={editValue}
+            onChange={(e) => onEditChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onCancelEdit()
+            }}
+            autoFocus
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: 6,
+              border: '2px solid #2563eb',
+              background: '#fff',
+              fontSize: 14,
+              lineHeight: 1.6,
+              minHeight: 120,
+              resize: 'vertical',
+              fontFamily: 'inherit',
+              outline: 'none',
+            }}
+          />
+        ) : (
+          <input
+            type="text"
+            value={editValue}
+            onChange={(e) => onEditChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSaveEdit()
+              if (e.key === 'Escape') onCancelEdit()
+            }}
+            autoFocus
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: 6,
+              border: '2px solid #2563eb',
+              background: '#fff',
+              fontSize: 14,
+              lineHeight: 1.6,
+              fontFamily: 'inherit',
+              outline: 'none',
+            }}
+          />
+        )
+      ) : (
+        <div
+          onClick={onStartEdit}
+          style={{
+            padding: '10px 14px',
+            borderRadius: 6,
+            border: `1px solid ${hasErrors ? '#fca5a5' : hasWarnings ? '#fde68a' : '#e5e7eb'}`,
+            background: hasErrors ? '#fef2f2' : hasWarnings ? '#fffbeb' : '#f9fafb',
+            fontSize: 14,
+            color: value ? '#111' : '#9ca3af',
+            lineHeight: 1.6,
+            whiteSpace: multiline ? 'pre-wrap' : 'normal',
+            minHeight: multiline ? 80 : undefined,
+            maxHeight: multiline ? 200 : undefined,
+            overflowY: multiline ? 'auto' : undefined,
+            cursor: 'pointer',
+            transition: 'border-color 0.15s',
+          }}
+          title="Klik om te bewerken"
+        >
+          {value || 'Niet ingevuld'}
+        </div>
+      )}
 
       {/* Character length bar for SEO fields */}
-      {maxLength && value && (
+      {maxLength && displayValue && (
         <div style={{ marginTop: 4, height: 3, borderRadius: 2, background: '#e5e7eb', overflow: 'hidden' }}>
           <div style={{
             height: '100%',
@@ -670,7 +1019,7 @@ function ContentField({
       )}
 
       {/* Issues */}
-      {issues.length > 0 && (
+      {issues.length > 0 && !editing && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {issues.map((issue, idx) => (
             <div key={idx} style={{
