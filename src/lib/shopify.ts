@@ -999,16 +999,22 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   ) => {
     const existingId = findMetafieldId(namespace, key)
     if (existingId) {
-      await shopifyFetch(`/metafields/${existingId}.json`, {
-        method: 'PUT',
-        body: JSON.stringify({ metafield: { id: existingId, value, type } }),
-      })
-    } else {
-      await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
-        method: 'POST',
-        body: JSON.stringify({ metafield: { namespace, key, value, type } }),
-      })
+      try {
+        await shopifyFetch(`/metafields/${existingId}.json`, {
+          method: 'PUT',
+          body: JSON.stringify({ metafield: { id: existingId, value, type } }),
+        })
+        return
+      } catch (err) {
+        // Metafield may have been garbage-collected (e.g. file_reference whose file was deleted).
+        // Fall through to POST to re-create it.
+        console.warn(`[Shopify Update] PUT metafield ${namespace}.${key} (${existingId}) failed, falling back to POST:`, err)
+      }
     }
+    await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
+      method: 'POST',
+      body: JSON.stringify({ metafield: { namespace, key, value, type } }),
+    })
   }
 
   // Upsert each metafield from the build payload

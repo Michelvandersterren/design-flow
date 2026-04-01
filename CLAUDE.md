@@ -258,7 +258,9 @@ rm -rf .next             # Wipe Next.js cache (then restart)
 ## Known Issues / Backlog
 
 - Shopify images: `driveUrl` passed as `images[{ src }]` — Drive public access confirmed (mockup uploads use `permissions.create({ role: 'reader', type: 'anyone' })`), but not yet verified end-to-end in production
-- EN translation: works via Claude, but was only recently wired up
+- EN/FR locales not yet published in Shopify store — translations are pre-loaded via API but invisible until activated (see Backlog at bottom)
+- Website-brede vertaalcontrole nog niet uitgevoerd (navigatie, footer, checkout, etc.)
+- Visuele controle van vertaalde infographic images voor alle 6 producten nog niet uitgevoerd
 
 ---
 
@@ -1446,3 +1448,54 @@ Nieuwe functies:
 | MC | — | — |
 
 **TypeScript check**: `npx tsc --noEmit` → 0 errors
+
+---
+
+## Session — 2026-04-01 (vervolg): Phase 9B Shopify push completed
+
+### Phase 9B — Bulk Shopify push for all 6 IB/SP products
+
+All 6 LIVE products with infographic mockups pushed to Shopify with images, NL metafields, DE/EN/FR file uploads, and translation registrations.
+
+| Product | Design ID | Shopify Product ID | Type | Translations | Status |
+|---------|----------|-------------------|------|-------------|--------|
+| ANCEGY | `cmnbh3udh0043lnwrq0o97e0z` | `10298565624150` | IB | pushed=6 | DONE |
+| FRMHRF | `cmn7zl40m001gn3frds5mkqyg` | `10297428607318` | IB | pushed=6 | DONE |
+| MONDRC | `cmnap34nq0008lnwrjtg6fhck` | `10298230964566` | IB | pushed=6 | DONE |
+| NLSNVG-IB | `cmnd8hwcz00013gujxcb063c9` | `10300254880086` | IB | pushed=6 | DONE |
+| FRMHRF-SP | `cmn9cqj37006sn3frig0ooivo` | `10297482281302` | SP | pushed=3 | DONE |
+| NLSNVG-SP | `cmnd8kynk00163guj2ehiz80b` | `10300257239382` | SP | pushed=3 | DONE |
+
+**Totaal: 30 infographic translations pushed, 0 errors.**
+
+### Code changes
+
+**`src/app/api/designs/[id]/shopify-update/route.ts`**:
+- Debug console.log statements verwijderd (waren tijdelijk toegevoegd voor Phase 9B monitoring)
+- Infographic translation push block vereenvoudigd
+
+### Bug fix: upsertMetafield 404 fallback (eerder deze sessie)
+
+**`src/lib/shopify.ts`** (~line 994-1018):
+- `upsertMetafield()` crashte met 404 wanneer een metafield verwees naar een file dat door Shopify was garbage-collected (na verwijdering en herupload van product images)
+- Fix: try/catch rond de PUT call; bij 404 valt door naar POST om het metafield opnieuw aan te maken
+
+### Bevinding: EN en FR locale-vertalingen niet zichtbaar in Shopify
+
+Bij verificatie bleek dat **alleen DE translations verschijnen** in de Shopify Translations API. EN en FR translations worden door `translationsRegister` geaccepteerd zonder errors, maar verschijnen niet bij queries.
+
+Dit geldt voor zowel infographic metafield translations als product content translations (title, body_html, SEO). Oorzaak: EN en FR zijn nog niet als gepubliceerde talen ingeschakeld in de Shopify store (Settings > Languages/Markets). De translations zijn "pre-loaded" en worden zichtbaar zodra die locales worden geactiveerd.
+
+### Scope issue fixes (eerder deze sessie)
+
+De volgende Shopify API scopes moesten handmatig worden toegevoegd aan de "Dashboard Sync" custom app (`gid://shopify/App/334164721665`):
+- `write_files` — nodig voor `fileCreate` GraphQL mutation (upload DE/EN/FR infographic images naar Shopify Files)
+- `read_translations` + `write_translations` — nodig voor `translatableResource` query en `translationsRegister` mutation
+
+## Backlog
+
+- [ ] **EN + FR locale activeren in Shopify** — EN en FR moeten als gepubliceerde talen worden toegevoegd in Shopify admin (Settings > Languages of Markets). Zonder dit worden translations door de API geaccepteerd maar niet weergegeven. Na activatie moeten alle 6 IB/SP producten opnieuw worden gepusht (of alleen de translation stap) om te verifiëren dat EN/FR translations zichtbaar worden.
+- [ ] **Website-brede vertaalcontrole** — Alle vertalingen op de volledige website controleren (niet alleen producten): navigatie, footer, checkout, e-mailnotificaties, collection pages, en theme-level content. Verifiëren dat DE translations correct worden weergegeven voor alle klantgerichte pagina's.
+- [ ] **Vertaalde infographic images controleren voor alle producten** — Visuele controle van alle gegenereerde infographic mockups (IB-mockup5, IB-mockup6, SP-mockup5) in alle 4 talen (NL/DE/EN/FR) voor alle 6 producten. Controleren op: correcte tekst, leesbaarheid, positionering, font sizing, en afkapping.
+- [ ] **Phase 10: Alt-text translations** — Alt-text voor product images vertalen naar DE/EN/FR
+- [ ] **Phase 11: Marketplace export** — Producten exporteren naar externe marktplaatsen (Bol.com, Amazon, etc.)
