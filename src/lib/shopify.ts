@@ -3,6 +3,18 @@ import { IB_SIZES, SP_SIZES, SP_MATERIALS, MC_MATERIALS, MC_SIZES } from './cons
 import { getDriveDirectUrl } from './drive'
 import { IB_SIZE_KEY_ALIASES } from './mockup-config'
 
+// ---------------------------------------------------------------------------
+// Infographic template mapping
+// Maps product type → ordered list of infographic templateIds.
+// Index 0 → custom.infographic_1, index 1 → custom.infographic_2.
+// These PSDs contain Dutch text that gets swapped per language during mockup generation.
+// ---------------------------------------------------------------------------
+const INFOGRAPHIC_MAP: Record<string, string[]> = {
+  IB: ['IB-mockup5', 'IB-mockup6'],
+  SP: ['SP-mockup5'],
+  // MC has no infographic templates
+}
+
 // Static material labels per product type (matches BrandVoice materialIB/SP).
 // MC is excluded: material varies per variant (Aluminium Dibond / Forex).
 const PRODUCT_MATERIAL: Record<string, string> = {
@@ -104,6 +116,52 @@ async function shopifyGraphQL(query: string, variables: Record<string, unknown> 
     throw new Error(`Shopify GraphQL error: ${JSON.stringify(json.errors)}`)
   }
   return json
+}
+
+/**
+ * Upload an image to Shopify Files using the fileCreate GraphQL mutation.
+ * Shopify fetches the image from the provided URL (e.g. Google Drive CDN).
+ *
+ * Returns the Shopify File GID (e.g. "gid://shopify/MediaImage/123456").
+ * This GID can be used as the value for file_reference metafields and translations.
+ */
+async function uploadToShopifyFiles(imageUrl: string, filename: string, altText?: string): Promise<string> {
+  const mutation = `
+    mutation fileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files {
+          id
+          alt
+          fileStatus
+          ... on MediaImage {
+            id
+            image { url }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `
+
+  const result = await shopifyGraphQL(mutation, {
+    files: [{
+      alt: altText ?? filename,
+      contentType: 'IMAGE',
+      originalSource: imageUrl,
+    }],
+  })
+
+  const userErrors = result.data?.fileCreate?.userErrors ?? []
+  if (userErrors.length > 0) {
+    throw new Error(`Shopify fileCreate error: ${JSON.stringify(userErrors)}`)
+  }
+
+  const files = result.data?.fileCreate?.files ?? []
+  if (files.length === 0) {
+    throw new Error('Shopify fileCreate returned no files')
+  }
+
+  return files[0].id as string
 }
 
 /**
@@ -330,7 +388,7 @@ export async function buildShopifyProduct(designId: string) {
   //
   // Each image entry has: src, alt, sizeKey? (for variant assignment later), isHeroDuplicate?
   // ---------------------------------------------------------------------------
-  type ImageEntry = { src: string; alt?: string; sizeKey?: string; isHeroDuplicate?: boolean }
+  type ImageEntry = { src: string; alt?: string; sizeKey?: string; isHeroDuplicate?: boolean; driveFileId?: string }
 
   // Predefined template ordering per product type (matches existing Shopify products)
   const IB_GENERIC_ORDER = ['IB-mockup3', 'IB-mockup5', 'IB-mockup4', 'IB-mockup6', 'IB-mockup02']
@@ -351,7 +409,10 @@ export async function buildShopifyProduct(designId: string) {
   const MC_GENERIC_ORDER = ['MC-lifestyle', 'MC-mockup3', 'MC-mockup5', 'MC-mockup6', 'MC-mockup7', 'MC-mockup8']
   const MC_SIZED_ORDER = ['MC-40cm', 'MC-60cm', 'MC-80cm', 'MC-100cm']
 
-  const mockupMap = new Map((design.mockups ?? []).map((m) => [m.templateId, m]))
+  // Filter to NL-only mockups for product images (Shopify product images are global/locale-neutral).
+  // Infographic templates have one row per language; we use only NL for the gallery.
+  const nlMockups = (design.mockups ?? []).filter((m) => m.language === 'nl')
+  const mockupMap = new Map(nlMockups.map((m) => [m.templateId, m]))
 
   const findMockup = (templateId: string): ImageEntry | null => {
     const m = mockupMap.get(templateId)
@@ -368,6 +429,7 @@ export async function buildShopifyProduct(designId: string) {
       src: getDriveDirectUrl(m.driveFileId, true),
       alt: m.altText ?? undefined,
       sizeKey,
+      driveFileId: m.driveFileId,
     }
   }
 
@@ -415,6 +477,42 @@ export async function buildShopifyProduct(designId: string) {
       const img = findMockup(tid)
       if (img) images.push(img)
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Collect infographic mockup data for locale-specific image translations.
+  // NL infographic images are already in the product gallery (via IB/SP_GENERIC_ORDER).
+  // DE/EN/FR versions need to be uploaded to Shopify Files and registered as
+  // translations of the custom.infographic_1 / custom.infographic_2 metafields.
+  // ---------------------------------------------------------------------------
+  type InfographicSlot = {
+    templateId: string
+    metafieldKey: string   // 'infographic_1' or 'infographic_2'
+    nlDriveFileId: string  // Drive file ID for NL version (used to match with uploaded product image)
+    translations: Array<{ language: string; driveFileId: string; driveUrl: string }>
+  }
+  const infographicSlots: InfographicSlot[] = []
+
+  const infographicTemplateIds = INFOGRAPHIC_MAP[firstType ?? ''] ?? []
+  for (let i = 0; i < infographicTemplateIds.length; i++) {
+    const templateId = infographicTemplateIds[i]
+    const metafieldKey = `infographic_${i + 1}`
+
+    // Find the NL mockup (already filtered in nlMockups/mockupMap)
+    const nlMockup = nlMockups.find((m) => m.templateId === templateId)
+    if (!nlMockup) continue
+
+    // Find DE/EN/FR mockups from the full (unfiltered) mockups list
+    const translations = (design.mockups ?? [])
+      .filter((m) => m.templateId === templateId && m.language !== 'nl')
+      .map((m) => ({ language: m.language, driveFileId: m.driveFileId, driveUrl: getDriveDirectUrl(m.driveFileId, true) }))
+
+    infographicSlots.push({
+      templateId,
+      metafieldKey,
+      nlDriveFileId: nlMockup.driveFileId,
+      translations,
+    })
   }
 
   return {
@@ -473,6 +571,7 @@ export async function buildShopifyProduct(designId: string) {
       ],
     },
     images,
+    infographicSlots,
   }
 }
 
@@ -497,7 +596,7 @@ function formatIbLabel(widthMm: number, heightMm: number): string {
  *  - beschrijving_afbeelding metafield is set to the image at position 2
  */
 export async function createShopifyProduct(designId: string) {
-  const { images, ...payload } = await buildShopifyProduct(designId)
+  const { images, infographicSlots, ...payload } = await buildShopifyProduct(designId)
   const data = await shopifyFetch('/products.json', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -511,7 +610,7 @@ export async function createShopifyProduct(designId: string) {
   // Track the Shopify image ID returned for each entry so we can later assign
   // variant images and set beschrijving_afbeelding.
   // ---------------------------------------------------------------------------
-  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string }
+  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string; driveFileId?: string }
   const uploadedImages: UploadedImage[] = []
 
   if (images.length > 0) {
@@ -533,6 +632,7 @@ export async function createShopifyProduct(designId: string) {
             shopifyMediaId: res.image.admin_graphql_api_id,
             position: res.image.position,
             sizeKey: img.sizeKey,
+            driveFileId: img.driveFileId,
           })
           console.log(`[Shopify] Image ${i + 1} uploaded OK — position ${res.image.position}`)
         } else {
@@ -645,6 +745,70 @@ export async function createShopifyProduct(designId: string) {
     })
   }
 
+  // ---------------------------------------------------------------------------
+  // Create infographic image metafields (custom.infographic_1 / infographic_2).
+  //
+  // NL value: the MediaImage GID of the product image already in the gallery.
+  // DE/EN/FR: uploaded to Shopify Files via fileCreate. Their GIDs are returned
+  // so the caller can push file_reference translations via translationsRegister.
+  //
+  // infographicTranslations: per metafield key, per language → Shopify File GID
+  // ---------------------------------------------------------------------------
+  type InfographicTranslation = { metafieldKey: string; language: string; shopifyFileGid: string }
+  const infographicTranslations: InfographicTranslation[] = []
+
+  if (infographicSlots.length > 0) {
+    console.log(`[Shopify] Setting up ${infographicSlots.length} infographic metafield(s)`)
+
+    for (const slot of infographicSlots) {
+      // Find the NL product image that matches this infographic's Drive file ID
+      const nlImage = uploadedImages.find((img) => img.driveFileId === slot.nlDriveFileId)
+      if (!nlImage) {
+        console.error(`[Shopify] Infographic ${slot.metafieldKey}: NL image not found in uploaded images (driveFileId: ${slot.nlDriveFileId})`)
+        continue
+      }
+
+      // Create the metafield pointing to the NL product image
+      try {
+        await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
+          method: 'POST',
+          body: JSON.stringify({
+            metafield: {
+              namespace: 'custom',
+              key: slot.metafieldKey,
+              value: nlImage.shopifyMediaId,
+              type: 'file_reference',
+            },
+          }),
+        })
+        console.log(`[Shopify] Metafield custom.${slot.metafieldKey} set to ${nlImage.shopifyMediaId}`)
+      } catch (err) {
+        console.error(`[Shopify] Failed to set ${slot.metafieldKey} metafield:`, err)
+        continue
+      }
+
+      // Upload DE/EN/FR versions to Shopify Files
+      for (const trans of slot.translations) {
+        try {
+          console.log(`[Shopify] Uploading ${trans.language.toUpperCase()} infographic for ${slot.metafieldKey}`)
+          const shopifyFileGid = await uploadToShopifyFiles(
+            trans.driveUrl,
+            `infographic-${slot.metafieldKey}-${trans.language}.jpg`,
+            `Infographic ${slot.metafieldKey} (${trans.language.toUpperCase()})`
+          )
+          infographicTranslations.push({
+            metafieldKey: slot.metafieldKey,
+            language: trans.language,
+            shopifyFileGid,
+          })
+          console.log(`[Shopify] ${trans.language.toUpperCase()} infographic uploaded: ${shopifyFileGid}`)
+        } catch (err) {
+          console.error(`[Shopify] Failed to upload ${trans.language} infographic for ${slot.metafieldKey}:`, err)
+        }
+      }
+    }
+  }
+
   // Save Shopify IDs back to variants (parallel — was sequential for-loop)
   await Promise.all(
     shopifyProduct.variants
@@ -709,6 +873,7 @@ export async function createShopifyProduct(designId: string) {
     shopifyProductId,
     shopifyProductHandle: shopifyProduct.handle,
     variantsCreated: shopifyProduct.variants.length,
+    infographicTranslations,
   }
 }
 
@@ -721,7 +886,7 @@ export async function createShopifyProduct(designId: string) {
  */
 export async function updateShopifyProduct(designId: string, shopifyProductId: string) {
   // Re-use buildShopifyProduct to get the canonical payload + image list
-  const { product: payload, images } = await buildShopifyProduct(designId)
+  const { product: payload, images, infographicSlots } = await buildShopifyProduct(designId)
 
   // Load design for extra fields not in payload
   const design = await prisma.design.findUnique({
@@ -872,7 +1037,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
   console.log(`[Shopify Update] Deleted ${existingImages.length} existing images`)
 
   // 5b. Upload new images sequentially (same logic as createShopifyProduct)
-  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string }
+  type UploadedImage = { shopifyImageId: number; shopifyMediaId: string; position: number; sizeKey?: string; driveFileId?: string }
   const uploadedImages: UploadedImage[] = []
 
   for (let i = 0; i < images.length; i++) {
@@ -890,6 +1055,7 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
           shopifyMediaId: res.image.admin_graphql_api_id,
           position: res.image.position,
           sizeKey: img.sizeKey,
+          driveFileId: img.driveFileId,
         })
         console.log(`[Shopify Update] Image ${i + 1} uploaded OK — position ${res.image.position}`)
       } else {
@@ -966,8 +1132,54 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
     await upsertMetafield('custom', 'beschrijving_afbeelding', pos2Image.shopifyMediaId, 'file_reference')
   }
 
+  // 5e. Infographic metafields: upsert NL values + upload DE/EN/FR to Shopify Files
+  type InfographicTranslation = { metafieldKey: string; language: string; shopifyFileGid: string }
+  const infographicTranslations: InfographicTranslation[] = []
+
+  if (infographicSlots.length > 0) {
+    console.log(`[Shopify Update] Processing ${infographicSlots.length} infographic metafield(s)`)
+
+    for (const slot of infographicSlots) {
+      // Find the NL product image that matches this infographic's Drive file ID
+      const nlImage = uploadedImages.find((img) => img.driveFileId === slot.nlDriveFileId)
+      if (!nlImage) {
+        console.error(`[Shopify Update] Infographic ${slot.metafieldKey}: NL image not found in uploaded images (driveFileId: ${slot.nlDriveFileId})`)
+        continue
+      }
+
+      // Upsert the metafield pointing to the NL product image
+      try {
+        await upsertMetafield('custom', slot.metafieldKey, nlImage.shopifyMediaId, 'file_reference')
+        console.log(`[Shopify Update] Metafield custom.${slot.metafieldKey} set to ${nlImage.shopifyMediaId}`)
+      } catch (err) {
+        console.error(`[Shopify Update] Failed to set ${slot.metafieldKey} metafield:`, err)
+        continue
+      }
+
+      // Upload DE/EN/FR versions to Shopify Files
+      for (const trans of slot.translations) {
+        try {
+          console.log(`[Shopify Update] Uploading ${trans.language.toUpperCase()} infographic for ${slot.metafieldKey}`)
+          const shopifyFileGid = await uploadToShopifyFiles(
+            trans.driveUrl,
+            `infographic-${slot.metafieldKey}-${trans.language}.jpg`,
+            `Infographic ${slot.metafieldKey} (${trans.language.toUpperCase()})`
+          )
+          infographicTranslations.push({
+            metafieldKey: slot.metafieldKey,
+            language: trans.language,
+            shopifyFileGid,
+          })
+          console.log(`[Shopify Update] ${trans.language.toUpperCase()} infographic uploaded: ${shopifyFileGid}`)
+        } catch (err) {
+          console.error(`[Shopify Update] Failed to upload ${trans.language} infographic for ${slot.metafieldKey}:`, err)
+        }
+      }
+    }
+  }
+
   console.log(`[Shopify Update] Full sync complete for product ${shopifyProductId}`)
-  return { shopifyProductId, updated: true }
+  return { shopifyProductId, updated: true, infographicTranslations }
 }
 
 /**

@@ -1,12 +1,13 @@
 /**
  * Shopify Translations API (GraphQL)
  *
- * Pushes translated content (DE / EN) to Shopify using the
+ * Pushes translated content (DE / EN / FR) to Shopify using the
  * Admin GraphQL API's `translationsRegister` mutation.
  *
  * Shopify locale codes: nl → nl (default, no push needed)
  *                       de → de
  *                       en → en
+ *                       fr → fr
  *
  * Fields pushed per locale:
  *   - Product: title, body_html
@@ -15,6 +16,8 @@
  *   - Metafield global.title_tag: value
  *   - Metafield global.description_tag: value
  *   - Metafield custom.google_description: value
+ *   - Metafield custom.infographic_1: value (file_reference — Shopify File GID)
+ *   - Metafield custom.infographic_2: value (file_reference — Shopify File GID)
  */
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL || ''
@@ -278,6 +281,133 @@ export async function pushTranslationsToShopify(
     } else {
       errors[lang] = result.reason instanceof Error ? result.reason.message : String(result.reason)
       console.error(`Translation push failed for ${lang}:`, result.reason)
+    }
+  }
+
+  return { pushed, errors }
+}
+
+/**
+ * Infographic translation entry: maps a metafield key + language to a Shopify File GID.
+ */
+export type InfographicTranslationEntry = {
+  metafieldKey: string      // 'infographic_1' or 'infographic_2'
+  language: string          // 'de' | 'en' | 'fr'
+  shopifyFileGid: string    // e.g. "gid://shopify/MediaImage/123456"
+}
+
+/**
+ * Push file_reference translations for infographic metafields.
+ *
+ * For each infographic metafield (custom.infographic_1 / custom.infographic_2),
+ * register the translated Shopify File GID as the value for each locale.
+ *
+ * The NL value is already set as the default metafield value (pointing to the
+ * product image). This function pushes the DE/EN/FR overrides.
+ *
+ * @param shopifyProductId      Numeric Shopify product ID (string)
+ * @param infographicTranslations  Array of { metafieldKey, language, shopifyFileGid }
+ */
+export async function pushInfographicTranslations(
+  shopifyProductId: string,
+  infographicTranslations: InfographicTranslationEntry[]
+): Promise<{ pushed: number; errors: string[] }> {
+  if (infographicTranslations.length === 0) {
+    return { pushed: 0, errors: [] }
+  }
+
+  const productGid = `gid://shopify/Product/${shopifyProductId}`
+  const errors: string[] = []
+  let pushed = 0
+
+  // Get metafield GIDs for custom.infographic_1 and custom.infographic_2
+  let metafieldMap: Map<string, { id: string; digest: string | null }>
+  try {
+    metafieldMap = await getProductMetafields(productGid)
+  } catch {
+    return { pushed: 0, errors: ['Failed to fetch metafield GIDs'] }
+  }
+
+  const digestQuery = `
+    query GetTranslatableResource($id: ID!) {
+      translatableResource(resourceId: $id) {
+        translatableContent {
+          key
+          value
+          digest
+          locale
+        }
+      }
+    }
+  `
+
+  const translationMutation = `
+    mutation RegisterTranslations($resourceId: ID!, $translations: [TranslationInput!]!) {
+      translationsRegister(resourceId: $resourceId, translations: $translations) {
+        translations { key locale value }
+        userErrors { field message }
+      }
+    }
+  `
+
+  // Group translations by metafieldKey to minimize API calls
+  const byMetafield = new Map<string, InfographicTranslationEntry[]>()
+  for (const t of infographicTranslations) {
+    const existing = byMetafield.get(t.metafieldKey) ?? []
+    existing.push(t)
+    byMetafield.set(t.metafieldKey, existing)
+  }
+
+  for (const [metafieldKey, translations] of byMetafield) {
+    const entry = metafieldMap.get(`custom.${metafieldKey}`)
+    if (!entry) {
+      errors.push(`Metafield custom.${metafieldKey} not found on product`)
+      continue
+    }
+
+    // Fetch the translatable content digest for this metafield
+    let mfDigest: string | undefined
+    try {
+      const mfDigestData = await shopifyGraphQL(digestQuery, { id: entry.id })
+      const mfContent: { key: string; digest: string }[] =
+        mfDigestData.data?.translatableResource?.translatableContent ?? []
+      mfDigest = mfContent.find((c) => c.key === 'value')?.digest
+    } catch (err) {
+      errors.push(`Failed to fetch digest for custom.${metafieldKey}: ${err}`)
+      continue
+    }
+
+    if (!mfDigest) {
+      errors.push(`No translatable digest found for custom.${metafieldKey}`)
+      continue
+    }
+
+    // Push all locale translations for this metafield in parallel
+    const results = await Promise.allSettled(
+      translations.map(async (t) => {
+        const locale = LOCALE_MAP[t.language]
+        if (!locale) throw new Error(`Unknown locale: ${t.language}`)
+
+        await shopifyGraphQL(translationMutation, {
+          resourceId: entry.id,
+          translations: [{
+            key: 'value',
+            value: t.shopifyFileGid,
+            locale,
+            translatableContentDigest: mfDigest!,
+          }],
+        })
+        return t.language
+      })
+    )
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        pushed++
+      } else {
+        const msg = result.reason instanceof Error ? result.reason.message : String(result.reason)
+        errors.push(`${metafieldKey}: ${msg}`)
+      }
     }
   }
 

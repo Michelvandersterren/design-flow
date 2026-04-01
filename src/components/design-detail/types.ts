@@ -67,6 +67,7 @@ export interface MockupGenerateResult {
   outputName: string
   label?: string
   sizeKey?: string
+  language?: string
   driveFileId: string
   driveUrl: string
   skipped?: boolean

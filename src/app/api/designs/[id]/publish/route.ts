@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createShopifyProduct, buildShopifyProduct, isShopifyConfigured } from '@/lib/shopify'
-import { pushTranslationsToShopify } from '@/lib/shopify-translations'
+import { pushTranslationsToShopify, pushInfographicTranslations } from '@/lib/shopify-translations'
 import { markDesignLiveInNotion } from '@/lib/notion'
 import { prisma } from '@/lib/prisma'
 
@@ -73,12 +73,25 @@ export async function POST(
     // Translations are non-fatal; DB status and Notion write-back are independent of translations.
     const translationPromise = (async () => {
       try {
+        // Push text content translations (DE/EN/FR)
         const translatedContent = await prisma.content.findMany({
           where: { designId, language: { in: ['de', 'en', 'fr'] } },
           select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
         })
         if (translatedContent.length > 0) {
           await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
+        }
+
+        // Push infographic image translations (file_reference metafields)
+        if (result.infographicTranslations.length > 0) {
+          const infResult = await pushInfographicTranslations(
+            result.shopifyProductId,
+            result.infographicTranslations
+          )
+          if (infResult.errors.length > 0) {
+            console.error('Infographic translation errors (non-fatal):', infResult.errors)
+          }
+          console.log(`[Publish] Infographic translations pushed: ${infResult.pushed}`)
         }
       } catch (translationError) {
         console.error('Translation push failed (non-fatal):', translationError)

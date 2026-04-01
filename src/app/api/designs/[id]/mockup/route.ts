@@ -28,9 +28,9 @@ export async function POST(
 
     let results
     if (templateId) {
-      // Single-template regeneration
+      // Single-template regeneration (may return array for infographic templates with multiple languages)
       const result = await regenerateSingleMockup(designId, templateId)
-      results = [result]
+      results = Array.isArray(result) ? result : [result]
     } else {
       // Generate all (generic + size-specific matched to variants)
       results = await generateAllMockupsForDesign(designId)

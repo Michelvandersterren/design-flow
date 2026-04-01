@@ -16,11 +16,19 @@ const OUT_DIR = path.join(os.tmpdir(), 'mockup-out')
 const PS_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const POLL_INTERVAL_MS = 2_000
 
+// Template IDs whose PSDs contain Dutch infographic text.
+// These get generated once per language (NL/DE/EN/FR).
+// All other templates produce only the NL version (language-neutral images).
+const INFOGRAPHIC_TEMPLATE_IDS = new Set(['IB-mockup5', 'IB-mockup6', 'SP-mockup5'])
+export const SUPPORTED_LANGUAGES = ['nl', 'de', 'en', 'fr'] as const
+export type Language = (typeof SUPPORTED_LANGUAGES)[number]
+
 export interface MockupResult {
   templateId: string
   outputName: string
   label: string
   sizeKey?: string
+  language: Language
   driveFileId: string
   driveUrl: string
   skipped?: boolean
@@ -33,13 +41,21 @@ const PRODUCT_TYPE_NL: Record<string, string> = {
   MC: 'muurcirkel',
 }
 
+const PRODUCT_TYPE_LABELS: Record<Language, Record<string, string>> = {
+  nl: { IB: 'inductiebeschermer', SP: 'spatscherm', MC: 'muurcirkel' },
+  de: { IB: 'Induktionsschutz', SP: 'Spritzschutz', MC: 'Wandkreis' },
+  en: { IB: 'induction protector', SP: 'splashback', MC: 'wall circle' },
+  fr: { IB: 'protecteur induction', SP: 'crédence', MC: 'cercle mural' },
+}
+
 /**
  * Bouwt een SEO alt-tekst voor een mockup afbeelding.
  * Gebruikt het template label — bijv. "sfeer keuken" — voor een beschrijvende, unieke alt.
+ * For non-NL infographic mockups, uses the localized product type name.
  */
-function buildMockupAltText(designName: string, productType: string, label: string): string {
-  const typeNl = PRODUCT_TYPE_NL[productType] ?? productType.toLowerCase()
-  return `${designName} ${typeNl} ${label} — KitchenArt`.slice(0, 125)
+function buildMockupAltText(designName: string, productType: string, label: string, language: Language = 'nl'): string {
+  const typeLabel = PRODUCT_TYPE_LABELS[language]?.[productType] ?? PRODUCT_TYPE_NL[productType] ?? productType.toLowerCase()
+  return `${designName} ${typeLabel} ${label} — KitchenArt`.slice(0, 125)
 }
 
 /**
@@ -52,7 +68,8 @@ function buildMockupAltText(designName: string, productType: string, label: stri
 async function generateMockupViaPhotoshop(
   designImageBuffer: Buffer,
   template: MockupTemplate,
-  designCode: string
+  designCode: string,
+  language: Language = 'nl'
 ): Promise<string> {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true })
 
@@ -65,13 +82,15 @@ async function generateMockupViaPhotoshop(
   execSync(`sips -s format png "${designJpgPath}" --out "${designTempPath}"`, { stdio: 'ignore' })
   try { fs.unlinkSync(designJpgPath) } catch (_) {}
 
-  const outPath = path.join(OUT_DIR, `${designCode}-${template.outputName}.jpg`)
+  const langSuffix = language === 'nl' ? '' : `-${language}`
+  const outPath = path.join(OUT_DIR, `${designCode}-${template.outputName}${langSuffix}.jpg`)
 
-  // Write job config
+  // Write job config — include language for infographic text swap
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
     psdPath: template.psdPath,
     designPath: designTempPath,
     outPath,
+    language,
   }))
 
   // Remove stale result file if present
@@ -111,11 +130,13 @@ async function generateMockupViaPhotoshop(
 
 /**
  * Build the Drive filename for a mockup.
- * Format: {designCode}-{productType}-{outputName}.jpg
- * Example: KA001-IB-sfeer-keuken.jpg
+ * Format: {designCode}-{productType}-{outputName}.jpg          (NL)
+ *         {designCode}-{productType}-{outputName}-{lang}.jpg   (DE/EN/FR)
+ * Example: KA001-IB-sfeer-keuken.jpg, KA001-IB-sfeer-keuken-de.jpg
  */
-function buildDriveFilename(designCode: string, productType: string, outputName: string): string {
-  return `${designCode}-${productType}-${outputName}.jpg`
+function buildDriveFilename(designCode: string, productType: string, outputName: string, language: Language = 'nl'): string {
+  const langSuffix = language === 'nl' ? '' : `-${language}`
+  return `${designCode}-${productType}-${outputName}${langSuffix}.jpg`
 }
 
 /**
@@ -125,6 +146,7 @@ function buildDriveFilename(designCode: string, productType: string, outputName:
  * @param saveSizeKey  The original variant sizeKey to store in DB. When provided,
  *                     this overrides template.sizeKey so the UI can match
  *                     m.sizeKey === vSizeKey even when an alias was used for PSD lookup.
+ * @param language     Target language for infographic text swap (defaults to 'nl').
  */
 async function generateAndSaveSingleMockup(
   designId: string,
@@ -133,13 +155,14 @@ async function generateAndSaveSingleMockup(
   productType: 'IB' | 'SP' | 'MC',
   designBuffer: Buffer,
   template: MockupTemplate,
-  saveSizeKey?: string
+  saveSizeKey?: string,
+  language: Language = 'nl'
 ): Promise<MockupResult> {
   try {
-    const outPath = await generateMockupViaPhotoshop(designBuffer, template, designCode)
+    const outPath = await generateMockupViaPhotoshop(designBuffer, template, designCode, language)
 
     const mockupBuffer = fs.readFileSync(outPath)
-    const mockupFileName = buildDriveFilename(designCode, productType, template.outputName)
+    const mockupFileName = buildDriveFilename(designCode, productType, template.outputName, language)
 
     const uploaded = await uploadDesignToDrive(
       mockupBuffer,
@@ -150,17 +173,17 @@ async function generateAndSaveSingleMockup(
 
     try { fs.unlinkSync(outPath) } catch (_) {}
 
-    const altText = buildMockupAltText(designName, productType, template.label)
+    const altText = buildMockupAltText(designName, productType, template.label, language)
 
     // Store the original variant sizeKey (saveSizeKey) when provided, not the resolved PSD key.
     // This lets the UI match m.sizeKey === vSizeKey correctly.
     const dbSizeKey = saveSizeKey !== undefined ? saveSizeKey : (template.sizeKey ?? null)
 
-    // Delete existing record for this template+sizeKey combo, then create fresh.
+    // Delete existing record for this template+sizeKey+language combo, then create fresh.
     // We match on sizeKey too so that multiple variant sizes sharing the same PSD template
     // (via IB_SIZE_KEY_ALIASES) each get their own DB row.
     await prisma.designMockup.deleteMany({
-      where: { designId, templateId: template.id, sizeKey: dbSizeKey },
+      where: { designId, templateId: template.id, sizeKey: dbSizeKey, language },
     })
     await prisma.designMockup.create({
       data: {
@@ -169,6 +192,7 @@ async function generateAndSaveSingleMockup(
         outputName: template.outputName,
         productType,
         sizeKey: dbSizeKey,
+        language,
         driveFileId: uploaded.fileId,
         driveUrl: uploaded.webContentLink,
         altText,
@@ -180,6 +204,7 @@ async function generateAndSaveSingleMockup(
       outputName: template.outputName,
       label: template.label,
       sizeKey: dbSizeKey ?? undefined,
+      language,
       driveFileId: uploaded.fileId,
       driveUrl: uploaded.webContentLink,
     }
@@ -190,6 +215,7 @@ async function generateAndSaveSingleMockup(
       outputName: template.outputName,
       label: template.label,
       sizeKey: saveSizeKey ?? template.sizeKey,
+      language,
       driveFileId: '',
       driveUrl: '',
       skipped: true,
@@ -256,6 +282,7 @@ export async function generateAllMockupsForDesign(designId: string): Promise<Moc
       templateId: 'none',
       outputName: 'none',
       label: 'geen templates',
+      language: 'nl' as Language,
       driveFileId: '',
       driveUrl: '',
       skipped: true,
@@ -266,14 +293,27 @@ export async function generateAllMockupsForDesign(designId: string): Promise<Moc
   const results: MockupResult[] = []
 
   // Run generic templates (no saveSizeKey needed)
+  // For infographic templates, generate one mockup per language (NL/DE/EN/FR).
+  // For all other templates, generate only NL (they contain no translatable text).
   for (const template of genericTemplates) {
-    const result = await generateAndSaveSingleMockup(
-      designId, design.designCode, design.designName, productType, designBuffer, template
-    )
-    results.push(result)
+    if (INFOGRAPHIC_TEMPLATE_IDS.has(template.id)) {
+      for (const lang of SUPPORTED_LANGUAGES) {
+        const result = await generateAndSaveSingleMockup(
+          designId, design.designCode, design.designName, productType, designBuffer, template,
+          undefined, lang
+        )
+        results.push(result)
+      }
+    } else {
+      const result = await generateAndSaveSingleMockup(
+        designId, design.designCode, design.designName, productType, designBuffer, template
+      )
+      results.push(result)
+    }
   }
 
-  // Run size-specific jobs, each tagged with the original variant sizeKey
+  // Run size-specific jobs, each tagged with the original variant sizeKey.
+  // Size-specific templates are never infographic templates, so always NL only.
   for (const { template, saveSizeKey } of sizeSpecificJobs) {
     const result = await generateAndSaveSingleMockup(
       designId, design.designCode, design.designName, productType, designBuffer, template, saveSizeKey
@@ -312,11 +352,15 @@ export async function generateAllMockupsForDesign(designId: string): Promise<Moc
 /**
  * Regenerate a single mockup by templateId.
  * Used by the per-mockup "Opnieuw genereren" button.
+ *
+ * For infographic templates, pass a specific language to regenerate just that
+ * language variant, or omit language to regenerate all 4 language variants.
  */
 export async function regenerateSingleMockup(
   designId: string,
-  templateId: string
-): Promise<MockupResult> {
+  templateId: string,
+  language?: Language
+): Promise<MockupResult | MockupResult[]> {
   const design = await prisma.design.findUnique({
     where: { id: designId },
     include: { variants: { take: 1 } },
@@ -340,9 +384,25 @@ export async function regenerateSingleMockup(
   const { base64 } = await getFileAsBase64(design.driveFileId)
   const designBuffer = Buffer.from(base64, 'base64')
 
+  const saveSizeKey = existing?.sizeKey ?? undefined
+
+  // For infographic templates: regenerate all languages (or just the requested one)
+  if (INFOGRAPHIC_TEMPLATE_IDS.has(templateId)) {
+    const langs = language ? [language] : [...SUPPORTED_LANGUAGES]
+    const results: MockupResult[] = []
+    for (const lang of langs) {
+      results.push(await generateAndSaveSingleMockup(
+        designId, design.designCode, design.designName, productType, designBuffer, template,
+        saveSizeKey, lang
+      ))
+    }
+    return language ? results[0] : results
+  }
+
+  // Non-infographic: always NL
   return generateAndSaveSingleMockup(
     designId, design.designCode, design.designName, productType, designBuffer, template,
-    existing?.sizeKey ?? undefined
+    saveSizeKey, 'nl'
   )
 }
 

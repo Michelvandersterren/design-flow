@@ -1348,3 +1348,101 @@ Nieuwe bestanden in `src/components/design-detail/`:
 - 91 unit tests (3 bestanden)
 - 23 integration tests (2 bestanden)
 - 114 totaal, alle geslaagd
+
+---
+
+## Session — 2026-04-01: Multilingual infographic mockups (Phase 5+6)
+
+### Achtergrond
+
+Drie PSD-templates bevatten Nederlandse infographic-tekst (labels met pijlen/dots):
+- **IB mockup-5.psd**: "Antislip-laag" (rasterized layer)
+- **IB mockup-6.psd**: "Oprolbaar & compact" + "Extra werkruimte" (rasterized layers)
+- **SP Mockup-5.psd**: "Gemakkelijk schoon te maken" + "Warmte-, spat- en krasbestendig" (TEXT layers)
+
+Alle overige 41 templates zijn taalneutraal (geen tekst). Dit werk voegt render-time text swap toe: per infographic template worden 4 taalvarianten (NL/DE/EN/FR) gegenereerd, zonder de PSD's te wijzigen.
+
+### Phase 5: Language-aware mockup generation
+
+**`prisma/schema.prisma`**
+- `language String @default("nl")` toegevoegd aan `DesignMockup` model
+- `prisma db push` uitgevoerd, Prisma Client geregenereerd
+
+**`scripts/generate-mockup.jsx`** (+457 lines)
+- `INFOGRAPHIC_MAP` constante: vertaalbaar voor alle 3 infographic PSDs, per taal (NL/DE/EN/FR)
+- `applyInfographicSwap(doc, psdFilename, language)`: past tekst aan voor non-NL talen
+  - TEXT layers (SP Mockup-5): swap `textItem.contents`, auto-fit width, height-based font shrink (FR: 135→107pt), positional clamp
+  - RASTERIZED layers (IB mockup-5/6): duplicate → erase text area → hide original → overlay new TEXT layer met `fitTextToWidth()`
+- `revertInfographicSwap(undoState)`: verwijdert tijdelijke layers, toont originelen, herstelt tekst/grootte/positie
+- Helper functies: `findArtLayerByName()`, `findGroupByName()`, `getBounds()`, `eraseRect()`, `fitTextToWidth()`, `getFilename()`
+- Volgorde: smart object fill → infographic swap → JPG export → revert → close WITHOUT saving
+
+**`src/lib/mockup.ts`** (+108/-56 lines)
+- `INFOGRAPHIC_TEMPLATE_IDS` set: `IB-mockup5`, `IB-mockup6`, `SP-mockup5`
+- `SUPPORTED_LANGUAGES` array: `['nl', 'de', 'en', 'fr']`
+- `Language` type export
+- `generateMockupViaPhotoshop()`: accepts `language` param, writes to job config
+- `buildDriveFilename()`: NL = geen suffix; DE/EN/FR = `-{lang}` suffix
+- `generateAndSaveSingleMockup()`: accepts `language`, deletes existing record matching `{designId, templateId, sizeKey, language}`, stores `language` in DB
+- `buildMockupAltText()`: uses `PRODUCT_TYPE_LABELS` per language (DE: "Induktionsschutz", EN: "induction protector", FR: "protecteur induction")
+- `generateAllMockupsForDesign()`: infographic templates → 4 runs (NL/DE/EN/FR); alle overige → 1 run (NL)
+- `regenerateSingleMockup()`: returns `MockupResult[]` for infographic templates (all 4 langs), `MockupResult` for others
+
+**`src/app/api/designs/[id]/mockup/route.ts`**
+- Handles array return from `regenerateSingleMockup`: `Array.isArray(result) ? result : [result]`
+
+**`src/components/design-detail/types.ts`**
+- `language?: string` toegevoegd aan `MockupGenerateResult` interface
+
+### Phase 6: Shopify infographic metafields + translations pipeline
+
+**`src/lib/shopify.ts`** (+226/-10 lines)
+
+Nieuwe constanten:
+- `INFOGRAPHIC_MAP`: `{ IB: ['IB-mockup5', 'IB-mockup6'], SP: ['SP-mockup5'] }` — maps producttype → infographic templateIds (index 0 = `custom.infographic_1`, index 1 = `custom.infographic_2`)
+
+Nieuwe functies:
+- `uploadToShopifyFiles(imageUrl, filename, altText)`: upload image naar Shopify Files via `fileCreate` GraphQL mutation; retourneert Shopify File GID
+
+`buildShopifyProduct()` wijzigingen:
+- `ImageEntry` type: `driveFileId` veld toegevoegd
+- `mockupMap` gefilterd op `language === 'nl'` (product images zijn globaal, niet per locale)
+- `findMockup()` retourneert nu ook `driveFileId`
+- Nieuw `InfographicSlot` type + `infographicSlots` array: verzamelt NL driveFileId + DE/EN/FR mockup driveFileIds per infographic template
+- Return value bevat nu `infographicSlots` naast `product` en `images`
+
+`createShopifyProduct()` wijzigingen:
+- `UploadedImage` type: `driveFileId` veld toegevoegd
+- Na image upload: creëert `custom.infographic_1` / `custom.infographic_2` metafields (type `file_reference`) met NL MediaImage GID
+- Upload DE/EN/FR infographic images naar Shopify Files via `uploadToShopifyFiles()`
+- Return value bevat `infographicTranslations: { metafieldKey, language, shopifyFileGid }[]`
+
+`updateShopifyProduct()` wijzigingen:
+- Zelfde infographic logica als `createShopifyProduct()`: upsert NL metafields + upload DE/EN/FR
+- Return value bevat `infographicTranslations`
+
+**`src/lib/shopify-translations.ts`** (+132 lines)
+
+- `InfographicTranslationEntry` type export: `{ metafieldKey, language, shopifyFileGid }`
+- `pushInfographicTranslations(shopifyProductId, entries)`: push `file_reference` translations via `translationsRegister` GraphQL mutation
+  - Fetches metafield GIDs via `getProductMetafields()`
+  - Fetches `translatableContentDigest` per metafield
+  - Registers translated file GID per locale via `translationsRegister`
+  - Parallel per locale, per-locale error handling
+  - Returns `{ pushed, errors }`
+
+**Publish routes (3 bestanden):**
+
+- `src/app/api/designs/[id]/publish/route.ts`: importeert `pushInfographicTranslations`, roept aan na text translations (non-fatal)
+- `src/app/api/designs/[id]/shopify-update/route.ts`: importeert `pushInfographicTranslations`, roept aan na text translations (non-fatal)
+- `src/app/api/workflow/bulk-publish/route.ts`: importeert `pushInfographicTranslations`, roept aan in translationPromise block (non-fatal)
+
+### Infographic metafield mapping (definitief)
+
+| Producttype | `custom.infographic_1` | `custom.infographic_2` |
+|---|---|---|
+| IB | IB-mockup5 | IB-mockup6 |
+| SP | SP-mockup5 | — |
+| MC | — | — |
+
+**TypeScript check**: `npx tsc --noEmit` → 0 errors

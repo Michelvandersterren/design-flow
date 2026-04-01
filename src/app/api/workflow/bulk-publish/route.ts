@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createShopifyProduct, isShopifyConfigured } from '@/lib/shopify'
-import { pushTranslationsToShopify } from '@/lib/shopify-translations'
+import { pushTranslationsToShopify, pushInfographicTranslations } from '@/lib/shopify-translations'
 import { markDesignLiveInNotion } from '@/lib/notion'
 
 export const maxDuration = 300 // 5 minutes for bulk operations
@@ -99,6 +99,14 @@ export async function POST(request: NextRequest) {
           }
         } catch (translationError) {
           console.error(`Translation push failed for ${design.designCode} (non-fatal):`, translationError)
+        }
+        // Push infographic file_reference translations (DE/EN/FR)
+        try {
+          if (result.infographicTranslations && result.infographicTranslations.length > 0) {
+            await pushInfographicTranslations(result.shopifyProductId, result.infographicTranslations)
+          }
+        } catch (infographicError) {
+          console.error(`Infographic translation push failed for ${design.designCode} (non-fatal):`, infographicError)
         }
       })()
 

@@ -105,6 +105,7 @@ model DesignMockup {
   createdAt   DateTime @default(now())
   altText     String?
   sizeKey     String?
+  language    String   @default("nl")
   design      Design   @relation(fields: [designId], references: [id], onDelete: Cascade)
 
   @@index([designId])
