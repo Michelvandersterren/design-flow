@@ -414,6 +414,9 @@ export async function buildShopifyProduct(designId: string) {
   const nlMockups = (design.mockups ?? []).filter((m) => m.language === 'nl')
   const mockupMap = new Map(nlMockups.map((m) => [m.templateId, m]))
 
+  // Template IDs that contain infographic text (used for alt-text tagging)
+  const infographicSet = new Set(Object.values(INFOGRAPHIC_MAP).flat())
+
   const findMockup = (templateId: string): ImageEntry | null => {
     const m = mockupMap.get(templateId)
     if (!m) return null
@@ -425,9 +428,15 @@ export async function buildShopifyProduct(designId: string) {
     if (sizeKey && firstType === 'IB') {
       sizeKey = IB_SIZE_KEY_ALIASES[sizeKey] ?? sizeKey
     }
+    // Prefix infographic images with [infographic] so the Liquid theme can
+    // identify them by alt-text and hide the NL versions on non-NL locales.
+    let alt = m.altText ?? undefined
+    if (alt && infographicSet.has(templateId)) {
+      alt = `[infographic] ${alt}`
+    }
     return {
       src: getDriveDirectUrl(m.driveFileId, true),
-      alt: m.altText ?? undefined,
+      alt,
       sizeKey,
       driveFileId: m.driveFileId,
     }
@@ -809,6 +818,39 @@ export async function createShopifyProduct(designId: string) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Set custom.infographic_media_ids metafield
+  // Stores the numeric Shopify media IDs (comma-separated) of the NL infographic
+  // images so the Liquid template can hide them on non-NL locales.
+  // Uses numeric IDs because they are VIA-translation-proof (unlike alt-text).
+  // ---------------------------------------------------------------------------
+  if (infographicSlots.length > 0) {
+    const infographicMediaIds = infographicSlots
+      .map((slot) => uploadedImages.find((img) => img.driveFileId === slot.nlDriveFileId))
+      .filter((img): img is UploadedImage => img != null)
+      .map((img) => String(img.shopifyImageId))
+      .join(',')
+
+    if (infographicMediaIds) {
+      try {
+        await shopifyFetch(`/products/${shopifyProductId}/metafields.json`, {
+          method: 'POST',
+          body: JSON.stringify({
+            metafield: {
+              namespace: 'custom',
+              key: 'infographic_media_ids',
+              value: infographicMediaIds,
+              type: 'single_line_text_field',
+            },
+          }),
+        })
+        console.log(`[Shopify] Metafield custom.infographic_media_ids set to "${infographicMediaIds}"`)
+      } catch (err) {
+        console.error(`[Shopify] Failed to set infographic_media_ids metafield:`, err)
+      }
+    }
+  }
+
   // Save Shopify IDs back to variants (parallel — was sequential for-loop)
   await Promise.all(
     shopifyProduct.variants
@@ -1180,6 +1222,24 @@ export async function updateShopifyProduct(designId: string, shopifyProductId: s
         } catch (err) {
           console.error(`[Shopify Update] Failed to upload ${trans.language} infographic for ${slot.metafieldKey}:`, err)
         }
+      }
+    }
+  }
+
+  // 5f. Set custom.infographic_media_ids metafield (VIA-proof infographic detection)
+  if (infographicSlots.length > 0) {
+    const infographicMediaIds = infographicSlots
+      .map((slot) => uploadedImages.find((img) => img.driveFileId === slot.nlDriveFileId))
+      .filter((img): img is UploadedImage => img != null)
+      .map((img) => String(img.shopifyImageId))
+      .join(',')
+
+    if (infographicMediaIds) {
+      try {
+        await upsertMetafield('custom', 'infographic_media_ids', infographicMediaIds, 'single_line_text_field')
+        console.log(`[Shopify Update] Metafield custom.infographic_media_ids set to "${infographicMediaIds}"`)
+      } catch (err) {
+        console.error(`[Shopify Update] Failed to set infographic_media_ids metafield:`, err)
       }
     }
   }
