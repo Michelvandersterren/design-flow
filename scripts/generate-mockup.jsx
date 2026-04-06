@@ -22,7 +22,8 @@
  *
  * --- Infographic text swap (render-time) ---
  *
- * Three PSD templates contain Dutch infographic text:
+ * Four PSD templates contain Dutch infographic text:
+ *   - IB mockup-4.psd: "Duurzaam  vinyl" + "Beschermt tegen  krassen & vuil" + "Oprolbaar & compact" (rasterized, top-level)
  *   - IB mockup-5.psd: "Antislip-laag" (rasterized, inside group "Antislip-laag")
  *   - IB mockup-6.psd: "Oprolbaar & compact copy" + "Extra  werkruimte copy" (rasterized, top-level)
  *   - SP Mockup-5.psd: "Gemakkelijk schoon te maken" + "Warmte-, spat- en krasbestendig" (TEXT layers, inside group "text")
@@ -105,6 +106,60 @@ var INFOGRAPHIC_MAP = {
           de: "Zus\u00E4tzliche\rArbeitsfl\u00E4che",
           en: "Extra\rworkspace",
           fr: "Plan de travail\rsuppl\u00E9mentaire"
+        }
+      }
+    ]
+  },
+  "mockup-4.psd": {
+    labels: [
+      {
+        oldLayerName: "Duurzaam  vinyl",
+        searchIn: "root",
+        color: "black",
+        textPosition: "bottom",        // icon at top, text at bottom
+        textAreaFraction: 0.50,        // bottom 50% = text area
+        textWidthMultiplier: 1.4,
+        erasePadX: 30,
+        erasePadY: 10,
+        translations: {
+          nl: "Duurzaam\rvinyl",
+          de: "Strapazierf\u00E4higes\rVinyl",
+          en: "Durable\rvinyl",
+          fr: "Vinyle\rdurable"
+        }
+      },
+      {
+        oldLayerName: "Beschermt tegen  krassen & vuil",
+        searchIn: "root",
+        color: "black",
+        textPosition: "bottom",
+        textAreaFraction: 0.50,
+        textWidthMultiplier: 1.4,
+        erasePadX: 30,
+        erasePadY: 10,
+        clampToCanvas: true,
+        clampMargin: 20,
+        translations: {
+          nl: "Beschermt tegen\rkrassen & vuil",
+          de: "Sch\u00FCtzt vor\rKratzern & Schmutz",
+          en: "Protects against\rscratches & dirt",
+          fr: "Prot\u00E8ge contre les\rrayures & saletés"
+        }
+      },
+      {
+        oldLayerName: "Oprolbaar & compact",
+        searchIn: "root",
+        color: "black",
+        textPosition: "bottom",
+        textAreaFraction: 0.50,
+        textWidthMultiplier: 1.4,
+        erasePadX: 30,
+        erasePadY: 10,
+        translations: {
+          nl: "Oprolbaar &\rcompact",
+          de: "Aufrollbar &\rkompakt",
+          en: "Rollable &\rcompact",
+          fr: "Enroulable &\rcompact"
         }
       }
     ]
@@ -470,7 +525,9 @@ function applyInfographicSwap(doc, psdFilename, language) {
     ti.position = [UnitValue(textAreaCX, "px"), UnitValue(textAreaTop, "px")];
 
     // Fit the text to the available width
-    var startFontSize = (psdFilename === "mockup-5.psd") ? 100 : 180;
+    var startFontSize = (psdFilename === "mockup-5.psd") ? 100
+                     : (psdFilename === "mockup-4.psd") ? 120
+                     : 180;
     fitTextToWidth(newLayer, textAreaWidth, startFontSize, 30);
 
     // Re-center after fitting
@@ -480,6 +537,21 @@ function applyInfographicSwap(doc, psdFilename, language) {
     var dx = targetCX - finalBounds.cx;
     var dy = targetCY - finalBounds.cy;
     newLayer.translate(dx, dy);
+
+    // Clamp rasterized text to canvas if configured
+    if (labelDef.clampToCanvas) {
+      var canvasW = doc.width.as("px");
+      var canvasH = doc.height.as("px");
+      var margin = labelDef.clampMargin || 20;
+      var clampB = getBounds(newLayer);
+      var clampDx = 0;
+      var clampDy = 0;
+      if (clampB.left < margin) clampDx = margin - clampB.left;
+      if (clampB.right > canvasW - margin) clampDx = (canvasW - margin) - clampB.right;
+      if (clampB.top < margin) clampDy = margin - clampB.top;
+      if (clampB.bottom > canvasH - margin) clampDy = (canvasH - margin) - clampB.bottom;
+      if (clampDx !== 0 || clampDy !== 0) newLayer.translate(clampDx, clampDy);
+    }
 
     // Move to top of layer stack
     try { newLayer.move(doc.layers[0], ElementPlacement.PLACEBEFORE); } catch (e) {}

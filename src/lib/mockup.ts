@@ -19,7 +19,7 @@ const POLL_INTERVAL_MS = 2_000
 // Template IDs whose PSDs contain Dutch infographic text.
 // These get generated once per language (NL/DE/EN/FR).
 // All other templates produce only the NL version (language-neutral images).
-const INFOGRAPHIC_TEMPLATE_IDS = new Set(['IB-mockup5', 'IB-mockup6', 'SP-mockup5'])
+const INFOGRAPHIC_TEMPLATE_IDS = new Set(['IB-mockup4', 'IB-mockup5', 'IB-mockup6', 'SP-mockup5'])
 export const SUPPORTED_LANGUAGES = ['nl', 'de', 'en', 'fr'] as const
 export type Language = (typeof SUPPORTED_LANGUAGES)[number]
 

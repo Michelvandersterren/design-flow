@@ -6,11 +6,13 @@ import { IB_SIZE_KEY_ALIASES } from './mockup-config'
 // ---------------------------------------------------------------------------
 // Infographic template mapping
 // Maps product type → ordered list of infographic templateIds.
-// Index 0 → custom.infographic_1, index 1 → custom.infographic_2.
+// Index 0 → custom.infographic_1, index 1 → custom.infographic_2, etc.
 // These PSDs contain Dutch text that gets swapped per language during mockup generation.
+// NOTE: IB-mockup4 is appended AFTER mockup5/mockup6 to preserve existing mapping
+// for 311+ live products (mockup5→infographic_1, mockup6→infographic_2).
 // ---------------------------------------------------------------------------
 const INFOGRAPHIC_MAP: Record<string, string[]> = {
-  IB: ['IB-mockup5', 'IB-mockup6'],
+  IB: ['IB-mockup5', 'IB-mockup6', 'IB-mockup4'],
   SP: ['SP-mockup5'],
   // MC has no infographic templates
 }
@@ -492,11 +494,11 @@ export async function buildShopifyProduct(designId: string) {
   // Collect infographic mockup data for locale-specific image translations.
   // NL infographic images are already in the product gallery (via IB/SP_GENERIC_ORDER).
   // DE/EN/FR versions need to be uploaded to Shopify Files and registered as
-  // translations of the custom.infographic_1 / custom.infographic_2 metafields.
+  // translations of the custom.infographic_N metafields (infographic_1, _2, _3).
   // ---------------------------------------------------------------------------
   type InfographicSlot = {
     templateId: string
-    metafieldKey: string   // 'infographic_1' or 'infographic_2'
+    metafieldKey: string   // 'infographic_1', 'infographic_2', 'infographic_3', etc.
     nlDriveFileId: string  // Drive file ID for NL version (used to match with uploaded product image)
     translations: Array<{ language: string; driveFileId: string; driveUrl: string }>
   }
@@ -755,7 +757,7 @@ export async function createShopifyProduct(designId: string) {
   }
 
   // ---------------------------------------------------------------------------
-  // Create infographic image metafields (custom.infographic_1 / infographic_2).
+  // Create infographic image metafields (custom.infographic_1 / _2 / _3).
   //
   // NL value: the MediaImage GID of the product image already in the gallery.
   // DE/EN/FR: uploaded to Shopify Files via fileCreate. Their GIDs are returned

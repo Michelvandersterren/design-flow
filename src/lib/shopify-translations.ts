@@ -291,7 +291,7 @@ export async function pushTranslationsToShopify(
  * Infographic translation entry: maps a metafield key + language to a Shopify File GID.
  */
 export type InfographicTranslationEntry = {
-  metafieldKey: string      // 'infographic_1' or 'infographic_2'
+  metafieldKey: string      // 'infographic_1', 'infographic_2', 'infographic_3', etc.
   language: string          // 'de' | 'en' | 'fr'
   shopifyFileGid: string    // e.g. "gid://shopify/MediaImage/123456"
 }
@@ -299,7 +299,7 @@ export type InfographicTranslationEntry = {
 /**
  * Push file_reference translations for infographic metafields.
  *
- * For each infographic metafield (custom.infographic_1 / custom.infographic_2),
+ * For each infographic metafield (custom.infographic_1 / _2 / _3),
  * register the translated Shopify File GID as the value for each locale.
  *
  * The NL value is already set as the default metafield value (pointing to the
@@ -388,7 +388,7 @@ export async function pushInfographicTranslations(
         const locale = LOCALE_MAP[t.language]
         if (!locale) throw new Error(`Unknown locale: ${t.language}`)
 
-        await shopifyGraphQL(translationMutation, {
+        const result = await shopifyGraphQL(translationMutation, {
           resourceId: entry.id,
           translations: [{
             key: 'value',
@@ -397,6 +397,15 @@ export async function pushInfographicTranslations(
             translatableContentDigest: mfDigest!,
           }],
         })
+
+        // Check for userErrors from the translationsRegister mutation
+        const userErrors = result.data?.translationsRegister?.userErrors ?? []
+        if (userErrors.length > 0) {
+          const errMsg = userErrors.map((e: { message: string }) => e.message).join('; ')
+          throw new Error(`translationsRegister userErrors: ${errMsg}`)
+        }
+
+        console.log(`[InfographicTranslations] Pushed ${t.metafieldKey} (${t.language}) → ${t.shopifyFileGid}`)
         return t.language
       })
     )

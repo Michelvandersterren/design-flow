@@ -69,42 +69,29 @@ export async function POST(
 
     const result = await createShopifyProduct(designId)
 
-    // Run translations and DB+Notion updates in parallel.
-    // Translations are non-fatal; DB status and Notion write-back are independent of translations.
-    const translationPromise = (async () => {
+    // --- Phase 1: Text translations + DB/Notion updates in parallel ---
+    // Text translations (title, description, SEO) don't depend on metafields,
+    // so they can run immediately. DB/Notion are independent of Shopify state.
+    const textTranslationPromise = (async () => {
       try {
-        // Push text content translations (DE/EN/FR)
         const translatedContent = await prisma.content.findMany({
           where: { designId, language: { in: ['de', 'en', 'fr'] } },
           select: { language: true, description: true, longDescription: true, seoTitle: true, seoDescription: true, googleShoppingDescription: true },
         })
         if (translatedContent.length > 0) {
           await pushTranslationsToShopify(result.shopifyProductId, translatedContent)
-        }
-
-        // Push infographic image translations (file_reference metafields)
-        if (result.infographicTranslations.length > 0) {
-          const infResult = await pushInfographicTranslations(
-            result.shopifyProductId,
-            result.infographicTranslations
-          )
-          if (infResult.errors.length > 0) {
-            console.error('Infographic translation errors (non-fatal):', infResult.errors)
-          }
-          console.log(`[Publish] Infographic translations pushed: ${infResult.pushed}`)
+          console.log(`[Publish] Text translations pushed for ${translatedContent.length} language(s)`)
         }
       } catch (translationError) {
-        console.error('Translation push failed (non-fatal):', translationError)
+        console.error('Text translation push failed (non-fatal):', translationError)
       }
     })()
 
     const dbAndNotionPromise = (async () => {
-      // Set design status to LIVE in DB
       const updatedDesign = await prisma.design.update({
         where: { id: designId },
         data: { status: 'LIVE' },
       })
-      // Write back to Notion if notionId is available
       if (updatedDesign.notionId) {
         try {
           await markDesignLiveInNotion(updatedDesign.notionId, result.shopifyProductHandle)
@@ -115,7 +102,28 @@ export async function POST(
       return updatedDesign
     })()
 
-    const [, updatedDesign] = await Promise.all([translationPromise, dbAndNotionPromise])
+    const [, updatedDesign] = await Promise.all([textTranslationPromise, dbAndNotionPromise])
+
+    // --- Phase 2: Infographic translations AFTER a delay ---
+    // Infographic translations need to fetch metafield GIDs from Shopify.
+    // Those metafields were just created by createShopifyProduct(), and Shopify
+    // needs a few seconds to fully commit them. Running this after the parallel
+    // phase above provides ~3-5s natural delay; we add an explicit 3s safety buffer.
+    if (result.infographicTranslations.length > 0) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 3000))
+        const infResult = await pushInfographicTranslations(
+          result.shopifyProductId,
+          result.infographicTranslations
+        )
+        if (infResult.errors.length > 0) {
+          console.error('Infographic translation errors (non-fatal):', infResult.errors)
+        }
+        console.log(`[Publish] Infographic translations pushed: ${infResult.pushed}`)
+      } catch (infError) {
+        console.error('Infographic translation push failed (non-fatal):', infError)
+      }
+    }
 
     return NextResponse.json({
       success: true,
