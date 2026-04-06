@@ -9,8 +9,9 @@ Een lokale webapplicatie voor het beheren van het volledige print-on-demand prod
 - **Automatische Vertaling**: NL naar DE, EN, FR vertalingen via Claude
 - **Variant Beheer**: Automatisch SKU's en EAN-codes genereren voor inductiebeschermers, muurcirkels en spatschermen
 - **Mockup Pipeline**: Photoshop JSX genereert JPEG mockups vanuit 44 PSD templates, opgeslagen op Google Drive
+- **Meertalige Infographics**: 4 PSD templates met infographictekst worden automatisch in NL/DE/EN/FR gerenderd via text-swap in Photoshop. Bij publicatie worden DE/EN/FR versies als Shopify File uploads geregistreerd via de Translations API (file_reference metafields)
 - **Print PDF Generatie**: PDF printbestanden via pdf-lib met CutContour spot color en 10mm bleed
-- **Shopify Publicatie**: Direct publiceren naar Shopify met alle metafields, vertalingen en variant images
+- **Shopify Publicatie**: Direct publiceren naar Shopify met alle metafields, vertalingen, variant images en infographic locale-swaps. Twee-fasen publishflow: tekst-vertalingen parallel, infographic-vertalingen sequentieel (met delay voor metafield committal)
 - **Health Check Dashboard**: 12 issue types detecteren (ontbrekende content, EANs, mockups, etc.)
 - **Content Review**: Split-panel review UI met quality scoring op basis van brand voice regels
 - **Bulk Regeneration**: Selectief content heropbouwen na brand voice wijzigingen
@@ -142,6 +143,23 @@ npx tsc --noEmit         # TypeScript check
 - `POST /api/ean/gs1-sync` - GS1 backfill registratie
 - `POST /api/workflow/bulk` - Bulk workflow pipeline
 - `POST /api/workflow/bulk-publish` - Bulk Shopify publish
+
+## Infographic Templates
+
+4 PSD templates bevatten Nederlandse infographictekst die per taal wordt verwisseld:
+
+| Template | Product | Labels |
+|----------|---------|--------|
+| `mockup-4.psd` | IB | Duurzaam vinyl, Beschermt tegen krassen & vuil, Oprolbaar & compact |
+| `mockup-5.psd` | IB | Antislip-laag |
+| `mockup-6.psd` | IB | Oprolbaar & compact, Extra werkruimte |
+| `Mockup-5.psd` | SP | Gemakkelijk schoon te maken, Warmte- spat- en krasbestendig |
+
+Mapping naar Shopify metafields:
+- IB: mockup-5 → `custom.infographic_1`, mockup-6 → `custom.infographic_2`, mockup-4 → `custom.infographic_3`
+- SP: Mockup-5 → `custom.infographic_1`
+
+De NL versie wordt als productafbeelding opgeslagen. DE/EN/FR versies worden geupload naar Shopify Files en als vertalingen van de file_reference metafields geregistreerd. Het Liquid theme-snippet `product-media-gallery.liquid` leest de vertaalde metafield en swapped de afbeelding op basis van de actieve locale.
 
 ## Product Types & SKU Structuur
 
